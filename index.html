@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Velogy — Process Capture</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  :root{
+    --violet: #7c3aed; --violet-dark: #6d28d9; --violet-light: #ede9fe;
+    --navy: #312e81; --green: #16a34a; --green-bg: #f0fdf4; --green-border: #bbf7d0;
+    --gray-50: #f7f7f9; --gray-100: #f1f1f4; --gray-200: #e5e5ea; --gray-400: #9ca3af;
+    --gray-500: #6b7280; --gray-700: #374151; --gray-900: #111827; --red: #dc2626; --red-bg:#fef2f2;
+  }
+  *{box-sizing:border-box;}
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--gray-50); color:var(--gray-900); padding:20px; }
+  .wrap{ max-width:1400px; margin:0 auto; }
+  .header{ background:#fff; border:1px solid var(--gray-200); border-radius:14px; padding:18px 24px;
+    display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:12px; }
+  .brand{ display:flex; align-items:center; gap:12px; }
+  .logo{ width:34px; height:34px; border-radius:8px; background:linear-gradient(135deg,var(--violet),var(--violet-dark));
+    display:flex; align-items:center; justify-content:center; color:#fff; font-size:16px; flex-shrink:0; }
+  .brand h1{ margin:0; font-size:19px; font-weight:700; }
+  .brand p{ margin:2px 0 0; font-size:12.5px; color:var(--gray-500); }
+  .actions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .btn{ border-radius:8px; padding:9px 14px; font-size:13.5px; font-weight:600; cursor:pointer;
+    border:1px solid transparent; transition:all .12s ease; white-space:nowrap; }
+  .btn:disabled{ opacity:.5; cursor:not-allowed; }
+  .btn-ghost{ background:#fff; border-color:var(--gray-200); color:var(--gray-700); }
+  .btn-ghost:hover:not(:disabled){ background:var(--gray-100); }
+  .btn-primary{ background:var(--violet); color:#fff; }
+  .btn-primary:hover:not(:disabled){ background:var(--violet-dark); }
+  .btn-danger{ background:#fff; border-color:var(--red); color:var(--red); }
+  .btn-danger:hover:not(:disabled){ background:var(--red-bg); }
+  .pill{ font-size:11.5px; font-weight:700; padding:3px 9px; border-radius:999px; }
+  .pill-admin{ background:var(--violet-light); color:var(--violet-dark); }
+  .pill-owner{ background:#dbeafe; color:#1e40af; }
+  .pill-viewer{ background:var(--gray-100); color:var(--gray-700); }
+
+  .center-wrap{ max-width:420px; margin:80px auto; }
+  .auth-card{ background:#fff; border:1px solid var(--gray-200); border-radius:14px; padding:32px; }
+  .auth-card h2{ margin:0 0 4px; font-size:20px; }
+  .auth-card p.sub{ margin:0 0 20px; color:var(--gray-500); font-size:13.5px; }
+  .field{ margin-bottom:14px; }
+  .field label{ display:block; font-size:12.5px; font-weight:600; color:var(--gray-700); margin-bottom:5px; }
+  select,input[type=text],input[type=email],input[type=password]{
+    width:100%; padding:9px 11px; border:1px solid var(--gray-200); border-radius:8px;
+    font-size:13.5px; background:#fff; color:var(--gray-900); }
+  select:disabled,input:disabled{ background:var(--gray-100); color:var(--gray-500); }
+  select:focus,input:focus{ outline:none; border-color:var(--violet); box-shadow:0 0 0 3px var(--violet-light); }
+  .full-btn{ width:100%; margin-top:6px; padding:10px; border:none; border-radius:8px; background:var(--violet);
+    color:#fff; font-weight:700; font-size:13.5px; cursor:pointer; }
+  .full-btn:hover{ background:var(--violet-dark); }
+  .link-btn{ background:none; border:none; color:var(--violet); font-weight:600; font-size:12.5px; cursor:pointer; padding:4px 0; }
+  .link-btn:hover{ text-decoration:underline; }
+  .auth-error{ background:var(--red-bg); color:var(--red); padding:9px 12px; border-radius:8px; font-size:12.5px; margin-bottom:14px; }
+  .status-box{ text-align:center; padding:40px 20px; }
+  .status-icon{ font-size:38px; margin-bottom:10px; }
+
+  .grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
+  @media (max-width:980px){ .grid{ grid-template-columns:1fr; } }
+  .card{ background:#fff; border:1px solid var(--gray-200); border-radius:14px; padding:18px 20px;
+    margin-bottom:14px; transition:border-color .15s ease,background .15s ease; }
+  .card.active{ border-color:var(--violet); box-shadow:0 0 0 3px var(--violet-light); }
+  .card.done{ border-color:var(--green-border); background:var(--green-bg); }
+  .card.disabled{ opacity:.55; }
+  .card-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:10px; }
+  .card-head-left{ display:flex; align-items:center; gap:10px; }
+  .badge{ font-size:11.5px; font-weight:700; color:#fff; padding:3px 8px; border-radius:6px; }
+  .badge-purple{ background:var(--violet); } .badge-navy{ background:var(--navy); }
+  .badge-gray{ background:var(--gray-400); } .badge-green{ background:var(--green); }
+  .card-title{ font-weight:700; font-size:14.5px; }
+  .card-hint{ font-size:12px; color:var(--gray-500); font-style:italic; }
+  .lock-btn{ width:100%; margin-top:10px; padding:10px; border:none; border-radius:8px; background:var(--violet);
+    color:#fff; font-weight:700; font-size:13.5px; cursor:pointer; }
+  .lock-btn:disabled{ background:var(--violet-light); color:var(--violet); cursor:not-allowed; }
+  .lock-btn.done-btn{ background:var(--green); }
+  .row-input{ display:flex; gap:8px; margin-bottom:8px; align-items:center; }
+  .row-input input{ flex:1; }
+  .icon-btn{ background:none; border:none; color:var(--red); font-size:15px; cursor:pointer; width:26px; flex-shrink:0; }
+  .empty-note{ color:var(--gray-400); font-size:13px; font-style:italic; padding:6px 0; }
+  .subblock{ border-left:3px solid var(--violet-light); padding-left:12px; margin-bottom:14px; }
+  .subblock-title{ font-weight:700; font-size:13px; color:var(--navy); margin-bottom:8px; }
+  .step-line{ display:flex; align-items:center; gap:8px; padding:7px 0; border-bottom:1px dashed var(--gray-200); }
+  .step-line:last-child{ border-bottom:none; }
+  .step-text{ flex:1; font-size:13px; }
+  .cls-btns{ display:flex; gap:6px; }
+  .cls-btn{ font-size:11.5px; font-weight:700; padding:4px 9px; border-radius:6px; cursor:pointer;
+    border:1px solid var(--gray-200); background:#fff; color:var(--gray-500); }
+  .cls-btn.critical.sel{ background:var(--red-bg); border-color:#fecaca; color:var(--red); }
+  .cls-btn.standard.sel{ background:var(--gray-100); border-color:var(--gray-200); color:var(--gray-700); }
+  .task-block{ background:var(--gray-50); border:1px solid var(--gray-200); border-radius:10px; padding:10px 12px; margin-bottom:10px; }
+  .task-block-header{ font-size:12px; color:var(--gray-500); margin-bottom:6px; }
+  .wi-row{ display:grid; grid-template-columns:1fr 1fr 1fr 26px; gap:6px; margin-top:6px; }
+  .wi-row input{ font-size:12.5px; padding:6px 8px; }
+  .tag{ font-size:10px; font-weight:700; padding:2px 6px; border-radius:5px; margin-left:6px; }
+  .tag-critical{ background:var(--red-bg); color:var(--red); } .tag-standard{ background:var(--gray-100); color:var(--gray-700); }
+  .stats{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin:14px 0 18px; }
+  .stat{ background:var(--gray-100); border-radius:10px; padding:12px 6px; text-align:center; }
+  .stat .l{ font-size:11.5px; color:var(--gray-500); font-weight:600; }
+  .stat .n{ font-size:22px; font-weight:800; margin-top:2px; }
+  .tree-process{ margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid var(--gray-200); }
+  .tree-process:last-child{ border-bottom:none; }
+  .tree-l1{ font-weight:700; color:var(--violet); font-size:15px; margin-bottom:6px; }
+  .tree-l2{ font-weight:700; font-size:13.5px; margin:6px 0 2px 10px; }
+  .tree-l3{ font-size:12.5px; color:var(--gray-700); margin:2px 0 2px 26px; }
+  .tree-l4{ font-size:12px; color:var(--gray-500); margin:2px 0 2px 42px; }
+  .tree-l4::before{ content:"→ "; }
+  .tree-l5{ font-size:11.5px; color:var(--violet-dark); margin:2px 0 2px 58px; font-family:ui-monospace,Menlo,monospace; }
+  .tree-l5::before{ content:"· "; }
+  .tree-empty{ text-align:center; color:var(--gray-400); font-size:13.5px; padding:40px 10px; line-height:1.7; }
+
+  .dash-list{ display:flex; flex-direction:column; gap:10px; }
+  .dash-item{ background:#fff; border:1px solid var(--gray-200); border-radius:12px; padding:14px 16px;
+    display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+  .dash-item h3{ margin:0 0 3px; font-size:14.5px; }
+  .dash-item .meta{ font-size:12px; color:var(--gray-500); }
+  .progress-dots{ display:flex; gap:4px; margin-top:6px; }
+  .dot{ width:8px; height:8px; border-radius:50%; background:var(--gray-200); }
+  .dot.on{ background:var(--violet); }
+
+  table.admin-table{ width:100%; border-collapse:collapse; font-size:13px; }
+  table.admin-table th{ text-align:left; font-size:11.5px; color:var(--gray-500); text-transform:uppercase;
+    padding:8px 10px; border-bottom:1px solid var(--gray-200); }
+  table.admin-table td{ padding:8px 10px; border-bottom:1px solid var(--gray-100); vertical-align:middle; }
+  .tabs{ display:flex; gap:6px; margin-bottom:16px; border-bottom:1px solid var(--gray-200); }
+  .tab{ padding:9px 14px; font-size:13.5px; font-weight:600; color:var(--gray-500); cursor:pointer; border-bottom:2px solid transparent; }
+  .tab.active{ color:var(--violet); border-bottom-color:var(--violet); }
+  .inline-form{ display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+  .inline-form input,.inline-form select{ width:auto; flex:1; min-width:140px; }
+
+  .modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:flex; align-items:center;
+    justify-content:center; z-index:40; }
+  .modal{ background:#fff; border-radius:14px; padding:24px; width:380px; max-width:92vw; }
+  .modal h3{ margin:0 0 16px; font-size:16px; }
+
+  .toast{ position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--gray-900); color:#fff;
+    padding:10px 18px; border-radius:8px; font-size:13px; opacity:0; pointer-events:none; transition:opacity .25s ease; z-index:50; }
+  .toast.show{ opacity:1; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const SUPABASE_URL = 'https://rmqiqhtdgwkatdxelywh.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtcWlxaHRkZ3drYXRkeGVseXdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4OTU2NDEsImV4cCI6MjEwMDQ3MTY0MX0.ICgW-E0BL7pTEynX3FpeLVv9K0nYuW3xH5xn_j_Glc4';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const MEGA_CYCLES = [
+  "Hire to Retire","Order to Cash","Procure to Pay","Record to Report",
+  "Plan to Fulfill","Idea to Market","Acquire to Retire (Asset)","Issue to Resolution"
+];
+
+let state = {
+  screen: 'loading',
+  user: null,
+  profile: null,
+  departments: [],
+  processList: [],
+  editorProcess: null,
+  adminTab: 'pending',
+  adminPending: [],
+  adminUsers: [],
+  authError: '',
+  showNewProcessModal: false
+};
+
+function escapeHtml(s){
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._h); toast._h = setTimeout(()=> t.classList.remove('show'), 2400);
+}
+const debounceTimers = {};
+function debounced(key, fn, delay=700){
+  clearTimeout(debounceTimers[key]);
+  debounceTimers[key] = setTimeout(fn, delay);
+}
+function sortTree(process){
+  if(!process.subprocesses) return process;
+  process.subprocesses.sort((a,b)=>a.position-b.position);
+  process.subprocesses.forEach(sp=>{
+    (sp.steps||[]).sort((a,b)=>a.position-b.position);
+    sp.steps.forEach(st=>{
+      (st.tasks||[]).sort((a,b)=>a.position-b.position);
+      st.tasks.forEach(t=> (t.work_instructions||[]).sort((a,b)=>a.position-b.position));
+    });
+  });
+  return process;
+}
+
+/* ================= INIT / AUTH ================= */
+async function init(){
+  const { data: { session } } = await sb.auth.getSession();
+  if(session){ state.user = session.user; await loadMyProfile(); }
+  else state.screen = 'login';
+  render();
+}
+async function loadMyProfile(){
+  const { data, error } = await sb.from('profiles').select('*').eq('id', state.user.id).single();
+  if(error || !data){ state.screen = 'login'; return; }
+  state.profile = data;
+  if(data.status === 'pending') state.screen = 'pending';
+  else if(data.status === 'rejected') state.screen = 'rejected';
+  else {
+    state.screen = 'dashboard';
+    await loadDepartments();
+    await loadProcessList();
+  }
+}
+async function doSignUp(email, password, fullName){
+  state.authError = '';
+  if(!email || !password){ state.authError = 'E-Mail und Passwort erforderlich.'; render(); return; }
+  const { error } = await sb.auth.signUp({ email, password, options:{ data:{ full_name: fullName } } });
+  if(error){ state.authError = error.message; render(); return; }
+  toast('Zugang angefragt — ein Admin muss dich freigeben.');
+  state.screen = 'login'; render();
+}
+async function doSignIn(email, password){
+  state.authError = '';
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if(error){ state.authError = error.message; render(); return; }
+  state.user = data.user;
+  await loadMyProfile();
+  render();
+}
+async function doSignOut(){
+  await sb.auth.signOut();
+  state = { screen:'login', user:null, profile:null, departments:[], processList:[], editorProcess:null,
+    adminTab:'pending', adminPending:[], adminUsers:[], authError:'', showNewProcessModal:false };
+  render();
+}
+
+/* ================= DEPARTMENTS ================= */
+async function loadDepartments(){
+  const { data } = await sb.from('departments').select('*').order('name');
+  state.departments = data || [];
+}
+async function createDepartment(name){
+  if(!name.trim()) return;
+  const { error } = await sb.from('departments').insert({ name: name.trim() });
+  if(error){ toast(error.message); return; }
+  toast('Abteilung angelegt.');
+  await loadDepartments(); render();
+}
+
+/* ================= DASHBOARD / PROCESS LIST ================= */
+async function loadProcessList(){
+  const { data, error } = await sb.from('processes')
+    .select('id, l1_name, department_id, l1_locked, l2_locked, l3_locked, l4_locked, created_at, departments(name)')
+    .order('created_at', { ascending:false });
+  if(error){ toast(error.message); return; }
+  state.processList = data || [];
+}
+function openNewProcessModal(){ state.showNewProcessModal = true; render(); }
+function closeNewProcessModal(){ state.showNewProcessModal = false; render(); }
+async function createProcess(l1Name, departmentId){
+  if(!l1Name){ toast('Bitte einen Mega-Cycle wählen.'); return; }
+  const dept = departmentId || state.profile.department_id;
+  if(!dept){ toast('Bitte eine Abteilung wählen.'); return; }
+  const { data, error } = await sb.from('processes')
+    .insert({ l1_name: l1Name, department_id: dept, created_by: state.profile.id })
+    .select().single();
+  if(error){ toast(error.message); return; }
+  state.showNewProcessModal = false;
+  toast('Prozess angelegt.');
+  await openEditor(data.id);
+}
+async function deleteProcess(id){
+  const { error } = await sb.from('processes').delete().eq('id', id);
+  if(error){ toast(error.message); return; }
+  toast('Prozess gelöscht.');
+  await loadProcessList(); render();
+}
+
+/* ================= EDITOR ================= */
+async function openEditor(processId){
+  const { data, error } = await sb.from('processes').select(`
+      id, l1_name, department_id, created_by, l1_locked, l2_locked, l3_locked, l4_locked, created_at,
+      subprocesses ( id, name, position,
+        steps ( id, text, classification, position,
+          tasks ( id, text, position,
+            work_instructions ( id, transaction, field, tool, position )
+          )
+        )
+      )
+    `).eq('id', processId).single();
+  if(error){ toast(error.message); return; }
+  data.subprocesses = data.subprocesses || [];
+  data.subprocesses.forEach(sp=>{
+    sp.steps = sp.steps || [];
+    sp.steps.forEach(st=>{
+      st.tasks = st.tasks || [];
+      st.tasks.forEach(t=> t.work_instructions = t.work_instructions || []);
+    });
+  });
+  state.editorProcess = sortTree(data);
+  state.screen = 'editor';
+  render();
+}
+function backToDashboard(){
+  state.editorProcess = null; state.screen = 'dashboard';
+  loadProcessList().then(render);
+}
+function findSp(spId){ return state.editorProcess.subprocesses.find(s=>s.id===spId); }
+function findStep(spId, stepId){ return findSp(spId).steps.find(s=>s.id===stepId); }
+function findTask(spId, stepId, taskId){ return findStep(spId, stepId).tasks.find(t=>t.id===taskId); }
+function getCriticalSteps(){
+  const out = [];
+  state.editorProcess.subprocesses.forEach(sp=> sp.steps.forEach(st=>{
+    if(st.classification==='critical') out.push({ sp, step: st });
+  }));
+  return out;
+}
+
+/* --- text edits (debounced db write, no full re-render) --- */
+function onL1NameInput(v){ state.editorProcess.l1_name = v; }
+function onSubName(spId, v){
+  findSp(spId).name = v; updateEditorTree();
+  debounced('sp-'+spId, ()=> sb.from('subprocesses').update({ name:v }).eq('id', spId));
+}
+function onStepText(spId, stepId, v){
+  findStep(spId, stepId).text = v; updateEditorTree();
+  debounced('step-'+stepId, ()=> sb.from('steps').update({ text:v }).eq('id', stepId));
+}
+function onTaskText(spId, stepId, taskId, v){
+  findTask(spId, stepId, taskId).text = v; updateEditorTree();
+  debounced('task-'+taskId, ()=> sb.from('tasks').update({ text:v }).eq('id', taskId));
+}
+function onWI(spId, stepId, taskId, wiId, field, v){
+  const wi = findTask(spId, stepId, taskId).work_instructions.find(w=>w.id===wiId);
+  wi[field] = v; updateEditorTree();
+  debounced('wi-'+wiId+'-'+field, ()=> sb.from('work_instructions').update({ [field]:v }).eq('id', wiId));
+}
+
+/* --- structural actions (await db, then re-render) --- */
+async function lockL1(){
+  if(!state.editorProcess.l1_name) return;
+  const { error } = await sb.from('processes').update({ l1_name: state.editorProcess.l1_name, l1_locked:true }).eq('id', state.editorProcess.id);
+  if(error){ toast(error.message); return; }
+  state.editorProcess.l1_locked = true; renderEditor();
+}
+async function unlockL1(){
+  await sb.from('processes').update({ l1_locked:false }).eq('id', state.editorProcess.id);
+  state.editorProcess.l1_locked = false; renderEditor();
+}
+async function addSubprocess(){
+  const position = state.editorProcess.subprocesses.length;
+  const { data, error } = await sb.from('subprocesses').insert({ process_id: state.editorProcess.id, name:'', position }).select().single();
+  if(error){ toast(error.message); return; }
+  data.steps = [];
+  state.editorProcess.subprocesses.push(data);
+  renderEditor();
+}
+async function removeSubprocess(spId){
+  await sb.from('subprocesses').delete().eq('id', spId);
+  state.editorProcess.subprocesses = state.editorProcess.subprocesses.filter(s=>s.id!==spId);
+  renderEditor();
+}
+async function lockL2(){
+  if(!state.editorProcess.subprocesses.some(s=>s.name.trim())) return;
+  await sb.from('processes').update({ l2_locked:true }).eq('id', state.editorProcess.id);
+  state.editorProcess.l2_locked = true; renderEditor();
+}
+async function unlockL2(){
+  await sb.from('processes').update({ l2_locked:false }).eq('id', state.editorProcess.id);
+  state.editorProcess.l2_locked = false; renderEditor();
+}
+async function addStep(spId){
+  const sp = findSp(spId);
+  const position = sp.steps.length;
+  const { data, error } = await sb.from('steps').insert({ subprocess_id: spId, text:'', position }).select().single();
+  if(error){ toast(error.message); return; }
+  data.tasks = [];
+  sp.steps.push(data);
+  renderEditor();
+}
+async function removeStep(spId, stepId){
+  await sb.from('steps').delete().eq('id', stepId);
+  const sp = findSp(spId);
+  sp.steps = sp.steps.filter(s=>s.id!==stepId);
+  renderEditor();
+}
+async function lockL3(){
+  const allHave = state.editorProcess.subprocesses.every(sp=>sp.steps.some(s=>s.text.trim()));
+  if(!allHave) return;
+  await sb.from('processes').update({ l3_locked:true }).eq('id', state.editorProcess.id);
+  state.editorProcess.l3_locked = true; renderEditor();
+}
+async function unlockL3(){
+  await sb.from('processes').update({ l3_locked:false }).eq('id', state.editorProcess.id);
+  state.editorProcess.l3_locked = false; renderEditor();
+}
+async function classifyStep(spId, stepId, cls){
+  await sb.from('steps').update({ classification: cls }).eq('id', stepId);
+  findStep(spId, stepId).classification = cls;
+  renderEditor();
+}
+async function addTask(spId, stepId){
+  const st = findStep(spId, stepId);
+  const position = st.tasks.length;
+  const { data, error } = await sb.from('tasks').insert({ step_id: stepId, text:'', position }).select().single();
+  if(error){ toast(error.message); return; }
+  data.work_instructions = [];
+  st.tasks.push(data);
+  renderEditor();
+}
+async function removeTask(spId, stepId, taskId){
+  await sb.from('tasks').delete().eq('id', taskId);
+  const st = findStep(spId, stepId);
+  st.tasks = st.tasks.filter(t=>t.id!==taskId);
+  renderEditor();
+}
+async function addWI(spId, stepId, taskId){
+  const task = findTask(spId, stepId, taskId);
+  const position = task.work_instructions.length;
+  const { data, error } = await sb.from('work_instructions').insert({ task_id: taskId, transaction:'', field:'', tool:'', position }).select().single();
+  if(error){ toast(error.message); return; }
+  task.work_instructions.push(data);
+  renderEditor();
+}
+async function removeWI(spId, stepId, taskId, wiId){
+  await sb.from('work_instructions').delete().eq('id', wiId);
+  const task = findTask(spId, stepId, taskId);
+  task.work_instructions = task.work_instructions.filter(w=>w.id!==wiId);
+  renderEditor();
+}
+async function lockL4(){
+  const crit = getCriticalSteps();
+  const ok = crit.length===0 || crit.every(c=>c.step.tasks.some(t=>t.text.trim()));
+  if(!ok) return;
+  await sb.from('processes').update({ l4_locked:true }).eq('id', state.editorProcess.id);
+  state.editorProcess.l4_locked = true; renderEditor();
+}
+async function unlockL4(){
+  await sb.from('processes').update({ l4_locked:false }).eq('id', state.editorProcess.id);
+  state.editorProcess.l4_locked = false; renderEditor();
+}
+
+/* ================= EXCEL EXPORT ================= */
+async function exportExcel(processIdOnly){
+  let query = sb.from('processes').select(`
+      l1_name, departments(name),
+      subprocesses ( name, position,
+        steps ( text, classification, position,
+          tasks ( text, position,
+            work_instructions ( transaction, field, tool, position )
+          )
+        )
+      )
+    `);
+  if(processIdOnly) query = query.eq('id', processIdOnly);
+  const { data, error } = await query;
+  if(error){ toast(error.message); return; }
+  const rows = [];
+  (data||[]).forEach(proc=>{
+    (proc.subprocesses||[]).sort((a,b)=>a.position-b.position).forEach(sp=>{
+      if(!sp.name || !sp.name.trim()) return;
+      (sp.steps||[]).sort((a,b)=>a.position-b.position).forEach(st=>{
+        if(!st.text || !st.text.trim()) return;
+        const base = {
+          "Abteilung": proc.departments ? proc.departments.name : '',
+          "L1 Mega-cycle": proc.l1_name,
+          "L2 Sub-process": sp.name,
+          "L3 Process step": st.text,
+          "Classification": st.classification || ''
+        };
+        const tasks = (st.tasks||[]).sort((a,b)=>a.position-b.position);
+        if(tasks.length===0){ rows.push({...base, "L4 Task":'', "L5 Transaction":'', "L5 Field":'', "L5 Tool":''}); return; }
+        tasks.forEach(task=>{
+          if(!task.text || !task.text.trim()) return;
+          const wis = (task.work_instructions||[]).sort((a,b)=>a.position-b.position);
+          if(wis.length===0){ rows.push({...base, "L4 Task":task.text, "L5 Transaction":'', "L5 Field":'', "L5 Tool":''}); return; }
+          wis.forEach(wi=>{
+            if(!wi.transaction && !wi.field && !wi.tool) return;
+            rows.push({...base, "L4 Task":task.text, "L5 Transaction":wi.transaction||'', "L5 Field":wi.field||'', "L5 Tool":wi.tool||''});
+          });
+        });
+      });
+    });
+  });
+  if(rows.length===0){ toast('Nichts zu exportieren.'); return; }
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{wch:16},{wch:20},{wch:20},{wch:26},{wch:12},{wch:26},{wch:16},{wch:16},{wch:16}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Process Capture");
+  XLSX.writeFile(wb, "Velogy_Process_Capture.xlsx");
+  toast('Exportiert.');
+}
+
+/* ================= ADMIN ================= */
+async function openAdmin(){
+  state.screen = 'admin';
+  await loadAdminData();
+  render();
+}
+async function loadAdminData(){
+  const { data: pending } = await sb.from('profiles').select('*').eq('status','pending').order('requested_at');
+  state.adminPending = pending || [];
+  const { data: all } = await sb.from('profiles').select('*, departments(name)').neq('status','pending').order('full_name');
+  state.adminUsers = all || [];
+  await loadDepartments();
+}
+function setAdminTab(tab){ state.adminTab = tab; render(); }
+async function approveUser(id){
+  const dept = document.getElementById('dept-'+id).value;
+  const role = document.getElementById('role-'+id).value;
+  if(!dept){ toast('Bitte eine Abteilung wählen.'); return; }
+  const { error } = await sb.from('profiles').update({ department_id: dept, role, status:'approved' }).eq('id', id);
+  if(error){ toast(error.message); return; }
+  toast('Nutzer freigegeben.');
+  await loadAdminData(); render();
+}
+async function rejectUser(id){
+  const { error } = await sb.from('profiles').update({ status:'rejected' }).eq('id', id);
+  if(error){ toast(error.message); return; }
+  toast('Anfrage abgelehnt.');
+  await loadAdminData(); render();
+}
+async function updateUser(id){
+  const dept = document.getElementById('udept-'+id).value;
+  const role = document.getElementById('urole-'+id).value;
+  const status = document.getElementById('ustatus-'+id).value;
+  const { error } = await sb.from('profiles').update({ department_id: dept, role, status }).eq('id', id);
+  if(error){ toast(error.message); return; }
+  toast('Gespeichert.');
+  await loadAdminData(); render();
+}
+
+/* ================= RENDER ================= */
+function render(){
+  const app = document.getElementById('app');
+  if(state.screen==='loading') app.innerHTML = `<div class="center-wrap"><div class="auth-card" style="text-align:center;">Lädt…</div></div>`;
+  else if(state.screen==='login') app.innerHTML = renderLogin();
+  else if(state.screen==='signup') app.innerHTML = renderSignup();
+  else if(state.screen==='pending') app.innerHTML = renderPending();
+  else if(state.screen==='rejected') app.innerHTML = renderRejected();
+  else if(state.screen==='dashboard') app.innerHTML = renderDashboard();
+  else if(state.screen==='admin') app.innerHTML = renderAdmin();
+  else if(state.screen==='editor') renderEditor();
+}
+
+function renderHeader(activeLabel){
+  const roleClass = state.profile.role==='admin' ? 'pill-admin' : (state.profile.role==='process_owner' ? 'pill-owner' : 'pill-viewer');
+  return `<div class="header">
+    <div class="brand">
+      <div class="logo">▶</div>
+      <div><h1>Velogy — Process Capture</h1><p>Layer-by-layer process aufnahme · Phase 1 tool for Process Owners</p></div>
+    </div>
+    <div class="actions">
+      <span class="pill ${roleClass}">${escapeHtml(state.profile.role)}</span>
+      <span style="font-size:12.5px; color:var(--gray-500);">${escapeHtml(state.profile.email || '')}</span>
+      ${state.profile.role==='admin' ? `<button class="btn btn-ghost" onclick="openAdmin()">Admin</button>` : ''}
+      <button class="btn btn-ghost" onclick="doSignOut()">Logout</button>
+    </div>
+  </div>`;
+}
+
+function renderLogin(){
+  return `<div class="center-wrap"><div class="auth-card">
+    <h2>Anmelden</h2><p class="sub">Zugang zum Velogy Process Capture Tool</p>
+    ${state.authError ? `<div class="auth-error">${escapeHtml(state.authError)}</div>` : ''}
+    <div class="field"><label>E-Mail</label><input type="email" id="login-email" placeholder="name@firma.de"></div>
+    <div class="field"><label>Passwort</label><input type="password" id="login-password"></div>
+    <button class="full-btn" onclick="doSignIn(document.getElementById('login-email').value, document.getElementById('login-password').value)">Einloggen</button>
+    <div style="text-align:center; margin-top:14px;">
+      <button class="link-btn" onclick="state.screen='signup'; state.authError=''; render();">Noch keinen Zugang? Zugang anfragen</button>
+    </div>
+  </div></div>`;
+}
+
+function renderSignup(){
+  return `<div class="center-wrap"><div class="auth-card">
+    <h2>Zugang anfragen</h2><p class="sub">Ein Admin muss deine Anfrage noch freigeben, bevor du loslegen kannst.</p>
+    ${state.authError ? `<div class="auth-error">${escapeHtml(state.authError)}</div>` : ''}
+    <div class="field"><label>Name</label><input type="text" id="su-name" placeholder="Max Mustermann"></div>
+    <div class="field"><label>E-Mail</label><input type="email" id="su-email" placeholder="name@firma.de"></div>
+    <div class="field"><label>Passwort</label><input type="password" id="su-password"></div>
+    <button class="full-btn" onclick="doSignUp(document.getElementById('su-email').value, document.getElementById('su-password').value, document.getElementById('su-name').value)">Zugang anfragen</button>
+    <div style="text-align:center; margin-top:14px;">
+      <button class="link-btn" onclick="state.screen='login'; state.authError=''; render();">Schon einen Zugang? Einloggen</button>
+    </div>
+  </div></div>`;
+}
+
+function renderPending(){
+  return `<div class="center-wrap"><div class="auth-card status-box">
+    <div class="status-icon">⏳</div>
+    <h2>Zugang angefragt</h2>
+    <p class="sub">Ein Admin muss deinen Zugang noch freigeben. Du bekommst dann Zugriff auf deine Abteilung.</p>
+    <button class="btn btn-ghost" onclick="doSignOut()">Ausloggen</button>
+  </div></div>`;
+}
+function renderRejected(){
+  return `<div class="center-wrap"><div class="auth-card status-box">
+    <div class="status-icon">🚫</div>
+    <h2>Zugang abgelehnt</h2>
+    <p class="sub">Dein Zugang wurde nicht freigegeben. Wende dich an deinen Admin, falls das ein Irrtum ist.</p>
+    <button class="btn btn-ghost" onclick="doSignOut()">Ausloggen</button>
+  </div></div>`;
+}
+
+function renderDashboard(){
+  const list = state.processList;
+  return `<div class="wrap">
+    ${renderHeader()}
+    <div class="header" style="padding:14px 24px;">
+      <div style="font-weight:700; font-size:15px;">Prozesse — ${state.profile.role==='admin' ? 'alle Abteilungen' : 'deine Abteilung'}</div>
+      <div class="actions">
+        <button class="btn btn-primary" onclick="openNewProcessModal()">+ Neuer Prozess</button>
+        <button class="btn btn-ghost" onclick="exportExcel()">⭳ Export to Excel</button>
+      </div>
+    </div>
+    <div class="dash-list">
+      ${list.length===0 ? `<div class="empty-note" style="text-align:center; padding:40px;">Noch keine Prozesse — leg den ersten mit "+ Neuer Prozess" an.</div>` : ''}
+      ${list.map(p=>`
+        <div class="dash-item">
+          <div>
+            <h3>${escapeHtml(p.l1_name)}</h3>
+            <div class="meta">${escapeHtml(p.departments ? p.departments.name : '')} · angelegt ${new Date(p.created_at).toLocaleDateString('de-DE')}</div>
+            <div class="progress-dots">
+              <div class="dot ${p.l1_locked?'on':''}"></div><div class="dot ${p.l2_locked?'on':''}"></div>
+              <div class="dot ${p.l3_locked?'on':''}"></div><div class="dot ${p.l4_locked?'on':''}"></div>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-primary" onclick="openEditor('${p.id}')">Öffnen</button>
+            <button class="btn btn-ghost" onclick="exportExcel('${p.id}')">Export</button>
+            ${(state.profile.role==='admin') ? `<button class="btn btn-danger" onclick="if(window.confirm('Prozess wirklich löschen?')) deleteProcess('${p.id}')">Löschen</button>` : ''}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  </div>
+  ${state.showNewProcessModal ? renderNewProcessModal() : ''}`;
+}
+
+function renderNewProcessModal(){
+  const showDeptPicker = state.profile.role==='admin';
+  return `<div class="modal-overlay" onclick="if(event.target===this) closeNewProcessModal()">
+    <div class="modal">
+      <h3>Neuen Prozess anlegen</h3>
+      <div class="field"><label>Mega-cycle (L1)</label>
+        <select id="np-l1">
+          <option value="">— auswählen —</option>
+          ${MEGA_CYCLES.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}
+        </select>
+      </div>
+      ${showDeptPicker ? `<div class="field"><label>Abteilung</label>
+        <select id="np-dept">
+          <option value="">— auswählen —</option>
+          ${state.departments.map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('')}
+        </select>
+      </div>` : ''}
+      <button class="full-btn" onclick="createProcess(document.getElementById('np-l1').value, ${showDeptPicker ? "document.getElementById('np-dept').value" : "null"})">Anlegen</button>
+      <button class="link-btn" style="margin-top:10px;" onclick="closeNewProcessModal()">Abbrechen</button>
+    </div>
+  </div>`;
+}
+
+function renderAdmin(){
+  return `<div class="wrap">
+    ${renderHeader()}
+    <div class="header" style="padding:14px 24px;">
+      <div style="font-weight:700; font-size:15px;">Admin</div>
+      <button class="btn btn-ghost" onclick="backToDashboard()">← Zurück zum Dashboard</button>
+    </div>
+    <div class="card">
+      <div class="tabs">
+        <div class="tab ${state.adminTab==='pending'?'active':''}" onclick="setAdminTab('pending')">Offene Anfragen (${state.adminPending.length})</div>
+        <div class="tab ${state.adminTab==='users'?'active':''}" onclick="setAdminTab('users')">Nutzer</div>
+        <div class="tab ${state.adminTab==='depts'?'active':''}" onclick="setAdminTab('depts')">Abteilungen</div>
+      </div>
+      ${state.adminTab==='pending' ? renderAdminPending() : ''}
+      ${state.adminTab==='users' ? renderAdminUsers() : ''}
+      ${state.adminTab==='depts' ? renderAdminDepts() : ''}
+    </div>
+  </div>`;
+}
+function renderAdminPending(){
+  if(state.adminPending.length===0) return `<div class="empty-note">Keine offenen Anfragen.</div>`;
+  return `<table class="admin-table"><thead><tr>
+    <th>Name</th><th>E-Mail</th><th>Abteilung</th><th>Rolle</th><th></th>
+  </tr></thead><tbody>
+  ${state.adminPending.map(u=>`
+    <tr>
+      <td>${escapeHtml(u.full_name || '—')}</td>
+      <td>${escapeHtml(u.email || '')}</td>
+      <td><select id="dept-${u.id}"><option value="">— wählen —</option>${state.departments.map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('')}</select></td>
+      <td><select id="role-${u.id}"><option value="viewer">viewer</option><option value="process_owner">process_owner</option><option value="admin">admin</option></select></td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-primary" onclick="approveUser('${u.id}')">Freigeben</button>
+        <button class="btn btn-danger" onclick="rejectUser('${u.id}')">Ablehnen</button>
+      </td>
+    </tr>
+  `).join('')}
+  </tbody></table>`;
+}
+function renderAdminUsers(){
+  if(state.adminUsers.length===0) return `<div class="empty-note">Noch keine Nutzer.</div>`;
+  return `<table class="admin-table"><thead><tr>
+    <th>Name</th><th>E-Mail</th><th>Abteilung</th><th>Rolle</th><th>Status</th><th></th>
+  </tr></thead><tbody>
+  ${state.adminUsers.map(u=>`
+    <tr>
+      <td>${escapeHtml(u.full_name || '—')}</td>
+      <td>${escapeHtml(u.email || '')}</td>
+      <td><select id="udept-${u.id}">${state.departments.map(d=>`<option value="${d.id}" ${u.department_id===d.id?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}</select></td>
+      <td><select id="urole-${u.id}">
+        <option value="viewer" ${u.role==='viewer'?'selected':''}>viewer</option>
+        <option value="process_owner" ${u.role==='process_owner'?'selected':''}>process_owner</option>
+        <option value="admin" ${u.role==='admin'?'selected':''}>admin</option>
+      </select></td>
+      <td><select id="ustatus-${u.id}">
+        <option value="approved" ${u.status==='approved'?'selected':''}>approved</option>
+        <option value="rejected" ${u.status==='rejected'?'selected':''}>rejected</option>
+      </select></td>
+      <td><button class="btn btn-primary" onclick="updateUser('${u.id}')">Speichern</button></td>
+    </tr>
+  `).join('')}
+  </tbody></table>`;
+}
+function renderAdminDepts(){
+  return `<div class="inline-form">
+      <input type="text" id="new-dept-name" placeholder="Neue Abteilung, z.B. Finance">
+      <button class="btn btn-primary" onclick="createDepartment(document.getElementById('new-dept-name').value); document.getElementById('new-dept-name').value='';">Anlegen</button>
+    </div>
+    <table class="admin-table"><thead><tr><th>Abteilung</th></tr></thead><tbody>
+      ${state.departments.map(d=>`<tr><td>${escapeHtml(d.name)}</td></tr>`).join('')}
+    </tbody></table>`;
+}
+
+/* ---------- editor rendering (left panel + right tree) ---------- */
+function renderEditor(){
+  const app = document.getElementById('app');
+  app.innerHTML = `<div class="wrap">
+    ${renderHeader()}
+    <div class="header" style="padding:14px 24px;">
+      <div style="font-weight:700; font-size:15px;">${escapeHtml(state.editorProcess.l1_name || 'Neuer Prozess')}</div>
+      <div class="actions">
+        <button class="btn btn-ghost" onclick="backToDashboard()">← Zurück</button>
+        <button class="btn btn-ghost" onclick="exportExcel(state.editorProcess.id)">⭳ Export</button>
+      </div>
+    </div>
+    <div class="grid">
+      <div id="editorLeft"></div>
+      <div class="card" style="position:sticky; top:20px;">
+        <div class="card-title" style="font-size:16px; margin-bottom:2px;">Process tree — live preview</div>
+        <div class="card-hint" style="margin-bottom:0;">Diese Ansicht aktualisiert sich live, während du ausfüllst.</div>
+        <div class="stats" id="stats"></div>
+        <div id="treeBody"></div>
+      </div>
+    </div>
+  </div>`;
+  renderEditorLeftPanel();
+  updateEditorTree();
+}
+
+function renderEditorLeftPanel(){
+  const p = state.editorProcess;
+  const c1 = p.l1_locked ? 'done' : 'active';
+  const c2 = !p.l1_locked ? 'disabled' : (p.l2_locked ? 'done' : 'active');
+  const c3 = !p.l2_locked ? 'disabled' : (p.l3_locked ? 'done' : 'active');
+  const c4 = !p.l3_locked ? 'disabled' : (p.l4_locked ? 'done' : 'active');
+
+  let html = '';
+
+  html += `<div class="card ${c1}">
+    <div class="card-head"><div class="card-head-left"><span class="badge badge-purple">L1</span><span class="card-title">End-to-end mega-cycle</span></div>
+    <span class="card-hint">dropdown, 8 standards</span></div>
+    <select ${p.l1_locked?'disabled':''} onchange="onL1NameInput(this.value)">
+      <option value="">— select mega-cycle —</option>
+      ${MEGA_CYCLES.map(m=>`<option value="${escapeHtml(m)}" ${p.l1_name===m?'selected':''}>${escapeHtml(m)}</option>`).join('')}
+    </select>
+    ${p.l1_locked
+      ? `<button class="lock-btn done-btn" onclick="unlockL1()">✓ Locked — click to edit</button>`
+      : `<button class="lock-btn" ${!p.l1_name?'disabled':''} onclick="lockL1()">Lock L1 → go to L2</button>`}
+  </div>`;
+
+  html += `<div class="card ${c2}">
+    <div class="card-head"><div class="card-head-left"><span class="badge ${p.l1_locked?'badge-purple':'badge-gray'}">L2</span><span class="card-title">Sub-processes</span></div>
+    <span class="card-hint">short noun phrases</span></div>`;
+  if(!p.l1_locked){ html += `<div class="empty-note">Lock L1 first to add sub-processes.</div>`; }
+  else {
+    if(p.subprocesses.length===0) html += `<div class="empty-note">Noch keine Sub-Prozesse.</div>`;
+    p.subprocesses.forEach(sp=>{
+      html += `<div class="row-input">
+        <input type="text" placeholder="e.g. Order management" value="${escapeHtml(sp.name)}" ${p.l2_locked?'disabled':''} oninput="onSubName('${sp.id}', this.value)">
+        ${!p.l2_locked ? `<button class="icon-btn" onclick="removeSubprocess('${sp.id}')">✕</button>` : ''}
+      </div>`;
+    });
+    if(!p.l2_locked) html += `<button class="link-btn" onclick="addSubprocess()">+ add sub-process</button>`;
+  }
+  html += `<button class="lock-btn ${p.l2_locked?'done-btn':''}" ${p.l2_locked ? '' : (!p.l1_locked || !p.subprocesses.some(s=>s.name.trim()) ? 'disabled':'')} onclick="${p.l2_locked?'unlockL2()':'lockL2()'}">${p.l2_locked?'✓ Locked — click to edit':'Lock L2 → go to L3'}</button>
+  </div>`;
+
+  html += `<div class="card ${c3}">
+    <div class="card-head"><div class="card-head-left"><span class="badge ${p.l2_locked?'badge-navy':'badge-gray'}">L3</span><span class="card-title">Process steps</span></div>
+    <span class="card-hint">verb first: "create...", "check..."</span></div>`;
+  if(!p.l2_locked){ html += `<div class="empty-note">Lock L2 first to add process steps.</div>`; }
+  else {
+    p.subprocesses.forEach(sp=>{
+      html += `<div class="subblock"><div class="subblock-title">${escapeHtml(sp.name)}</div>`;
+      if(sp.steps.length===0 && !p.l3_locked) html += `<div class="empty-note">Noch keine Steps.</div>`;
+      sp.steps.forEach(st=>{
+        if(!p.l3_locked){
+          html += `<div class="row-input">
+            <input type="text" placeholder="e.g. Create sales order" value="${escapeHtml(st.text)}" oninput="onStepText('${sp.id}','${st.id}', this.value)">
+            <button class="icon-btn" onclick="removeStep('${sp.id}','${st.id}')">✕</button>
+          </div>`;
+        } else {
+          html += `<div class="step-line">
+            <div class="step-text">${escapeHtml(st.text)}</div>
+            <div class="cls-btns">
+              <button class="cls-btn critical ${st.classification==='critical'?'sel':''}" onclick="classifyStep('${sp.id}','${st.id}','critical')">Critical</button>
+              <button class="cls-btn standard ${st.classification==='standard'?'sel':''}" onclick="classifyStep('${sp.id}','${st.id}','standard')">Standard</button>
+            </div>
+          </div>`;
+        }
+      });
+      if(!p.l3_locked) html += `<button class="link-btn" onclick="addStep('${sp.id}')">+ add step</button>`;
+      html += `</div>`;
+    });
+  }
+  const allHaveSteps = p.l2_locked && p.subprocesses.length>0 && p.subprocesses.every(sp=>sp.steps.some(s=>s.text.trim()));
+  html += `<button class="lock-btn ${p.l3_locked?'done-btn':''}" ${p.l3_locked ? '' : (!allHaveSteps ? 'disabled':'')} onclick="${p.l3_locked?'unlockL3()':'lockL3()'}">${p.l3_locked?'✓ Locked — click to edit steps':'Lock L3 → classify critical / standard'}</button>
+  </div>`;
+
+  html += `<div class="card ${c4}">
+    <div class="card-head"><div class="card-head-left"><span class="badge ${p.l3_locked?'badge-navy':'badge-gray'}">L4</span><span class="card-title">Tasks (critical steps only)</span></div>
+    <span class="card-hint">verb + object, e.g. "Enter customer ID"</span></div>`;
+  let criticalSteps = [];
+  if(!p.l3_locked){ html += `<div class="empty-note">Lock L3 first, then classify each step.</div>`; }
+  else {
+    criticalSteps = getCriticalSteps();
+    if(criticalSteps.length===0) html += `<div class="empty-note">No steps classified as critical yet — mark steps critical in L3 above.</div>`;
+    criticalSteps.forEach(({sp, step})=>{
+      html += `<div class="subblock"><div class="subblock-title">${escapeHtml(sp.name)} <span class="tag tag-critical">critical</span><br><span style="font-weight:400; color:var(--gray-500); font-size:12px;">${escapeHtml(step.text)}</span></div>`;
+      step.tasks.forEach(task=>{
+        html += `<div class="task-block">
+          <div class="row-input">
+            <input type="text" placeholder="e.g. Enter customer ID" value="${escapeHtml(task.text)}" ${p.l4_locked?'disabled':''} oninput="onTaskText('${sp.id}','${step.id}','${task.id}', this.value)">
+            ${!p.l4_locked ? `<button class="icon-btn" onclick="removeTask('${sp.id}','${step.id}','${task.id}')">✕</button>` : ''}
+          </div>
+          <div class="task-block-header">L5 work instructions <span style="opacity:.6;">(transaction · field · tool)</span></div>`;
+        task.work_instructions.forEach(wi=>{
+          html += `<div class="wi-row">
+            <input type="text" placeholder="Transaction" value="${escapeHtml(wi.transaction)}" ${p.l4_locked?'disabled':''} oninput="onWI('${sp.id}','${step.id}','${task.id}','${wi.id}','transaction', this.value)">
+            <input type="text" placeholder="Field" value="${escapeHtml(wi.field)}" ${p.l4_locked?'disabled':''} oninput="onWI('${sp.id}','${step.id}','${task.id}','${wi.id}','field', this.value)">
+            <input type="text" placeholder="Tool" value="${escapeHtml(wi.tool)}" ${p.l4_locked?'disabled':''} oninput="onWI('${sp.id}','${step.id}','${task.id}','${wi.id}','tool', this.value)">
+            ${!p.l4_locked ? `<button class="icon-btn" onclick="removeWI('${sp.id}','${step.id}','${task.id}','${wi.id}')">✕</button>` : `<span></span>`}
+          </div>`;
+        });
+        if(!p.l4_locked) html += `<button class="link-btn" onclick="addWI('${sp.id}','${step.id}','${task.id}')">+ add work instruction</button>`;
+        html += `</div>`;
+      });
+      if(!p.l4_locked) html += `<button class="link-btn" onclick="addTask('${sp.id}','${step.id}')">+ add task</button>`;
+      html += `</div>`;
+    });
+  }
+  const allHaveTasks = p.l3_locked && (criticalSteps.length===0 || criticalSteps.every(c=>c.step.tasks.some(t=>t.text.trim())));
+  html += `<button class="lock-btn ${p.l4_locked?'done-btn':''}" ${p.l4_locked ? '' : (!allHaveTasks?'disabled':'')} onclick="${p.l4_locked?'unlockL4()':'lockL4()'}">${p.l4_locked?'✓ Locked — click to edit':'Lock L4 → go to L5'}</button>
+  </div>`;
+
+  html += `<div class="card ${p.l4_locked?'done':'disabled'}">
+    <div class="card-head"><div class="card-head-left"><span class="badge ${p.l4_locked?'badge-green':'badge-gray'}">L5</span><span class="card-title">Work instructions</span></div>
+    <span class="card-hint">system-specific: transaction, field, tool</span></div>
+    <div class="empty-note" style="font-style:normal; color:var(--gray-500);">
+      ${p.l4_locked ? '✓ Work instructions captured inside each L4 task card above.' : 'L5 lives inside each L4 task card. Fill them in the L4 section above.'}
+    </div>
+  </div>`;
+
+  document.getElementById('editorLeft').innerHTML = html;
+}
+
+function updateEditorTree(){
+  const p = state.editorProcess;
+  const l1c = p.l1_name ? 1 : 0;
+  const l2c = p.subprocesses.filter(s=>s.name.trim()).length;
+  const l3c = p.subprocesses.reduce((n,s)=> n + s.steps.filter(st=>st.text.trim()).length, 0);
+  const l4c = p.subprocesses.reduce((n,s)=> n + s.steps.reduce((m,st)=> m + st.tasks.filter(t=>t.text.trim()).length, 0), 0);
+  const l5c = p.subprocesses.reduce((n,s)=> n + s.steps.reduce((m,st)=> m + st.tasks.reduce((k,t)=> k + t.work_instructions.filter(w=>w.transaction.trim()||w.field.trim()||w.tool.trim()).length, 0), 0), 0);
+  const statsEl = document.getElementById('stats');
+  if(statsEl) statsEl.innerHTML = `
+    <div class="stat"><div class="l">L1</div><div class="n">${l1c}</div></div>
+    <div class="stat"><div class="l">L2</div><div class="n">${l2c}</div></div>
+    <div class="stat"><div class="l">L3</div><div class="n">${l3c}</div></div>
+    <div class="stat"><div class="l">L4</div><div class="n">${l4c}</div></div>
+    <div class="stat"><div class="l">L5</div><div class="n">${l5c}</div></div>`;
+
+  let h = '';
+  if(p.l1_name){
+    h += `<div class="tree-process"><div class="tree-l1">${escapeHtml(p.l1_name)}</div>`;
+    p.subprocesses.forEach(sp=>{
+      if(!sp.name.trim()) return;
+      h += `<div class="tree-l2">${escapeHtml(sp.name)}</div>`;
+      sp.steps.forEach(st=>{
+        if(!st.text.trim()) return;
+        const clsTag = st.classification ? `<span class="tag tag-${st.classification}">${st.classification}</span>` : '';
+        h += `<div class="tree-l3">${escapeHtml(st.text)} ${clsTag}</div>`;
+        st.tasks.forEach(task=>{
+          if(!task.text.trim()) return;
+          h += `<div class="tree-l4">${escapeHtml(task.text)}</div>`;
+          task.work_instructions.forEach(wi=>{
+            if(!wi.transaction.trim() && !wi.field.trim() && !wi.tool.trim()) return;
+            const parts = [wi.transaction, wi.field, wi.tool].filter(Boolean).map(escapeHtml).join(' · ');
+            h += `<div class="tree-l5">${parts}</div>`;
+          });
+        });
+      });
+    });
+    h += `</div>`;
+  }
+  const treeEl = document.getElementById('treeBody');
+  if(treeEl) treeEl.innerHTML = h.trim() ? h : `<div class="tree-empty">Wähle L1, um zu starten.</div>`;
+}
+
+init();
+</script>
+</body>
+</html>
