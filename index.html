@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>Velogy — Process Capture</title>
@@ -57,6 +57,9 @@
   .auth-error{ background:var(--red-bg); color:var(--red); padding:9px 12px; border-radius:8px; font-size:12.5px; margin-bottom:14px; }
   .status-box{ text-align:center; padding:40px 20px; }
   .status-icon{ font-size:38px; margin-bottom:10px; }
+  .spinner{ width:28px; height:28px; border:3px solid var(--violet-light); border-top-color:var(--violet);
+    border-radius:50%; margin:0 auto 14px; animation:spin .8s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
 
   .grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
   @media (max-width:980px){ .grid{ grid-template-columns:1fr; } }
@@ -165,7 +168,11 @@ let state = {
   adminPending: [],
   adminUsers: [],
   authError: '',
-  showNewProcessModal: false
+  showNewProcessModal: false,
+  showNewDeptInline: false,
+  lastCreatedDeptId: null,
+  dashboardSearch: '',
+  dashboardSort: 'newest'
 };
 
 function escapeHtml(s){
@@ -195,10 +202,21 @@ function sortTree(process){
 }
 
 /* ================= INIT / AUTH ================= */
+sb.auth.onAuthStateChange((event, session) => {
+  if(event === 'PASSWORD_RECOVERY'){
+    state.screen = 'reset-password';
+    render();
+  }
+});
 async function init(){
-  const { data: { session } } = await sb.auth.getSession();
-  if(session){ state.user = session.user; await loadMyProfile(); }
-  else state.screen = 'login';
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    if(session){ state.user = session.user; await loadMyProfile(); }
+    else state.screen = 'login';
+  } catch(e){
+    state.screen = 'connection-error';
+    state.authError = String(e.message || e);
+  }
   render();
 }
 async function loadMyProfile(){
@@ -215,10 +233,10 @@ async function loadMyProfile(){
 }
 async function doSignUp(email, password, fullName){
   state.authError = '';
-  if(!email || !password){ state.authError = 'E-Mail und Passwort erforderlich.'; render(); return; }
+  if(!email || !password){ state.authError = 'Email and password are required.'; render(); return; }
   const { error } = await sb.auth.signUp({ email, password, options:{ data:{ full_name: fullName } } });
   if(error){ state.authError = error.message; render(); return; }
-  toast('Zugang angefragt — ein Admin muss dich freigeben.');
+  toast('Access requested — an admin needs to approve you.');
   state.screen = 'login'; render();
 }
 async function doSignIn(email, password){
@@ -232,7 +250,27 @@ async function doSignIn(email, password){
 async function doSignOut(){
   await sb.auth.signOut();
   state = { screen:'login', user:null, profile:null, departments:[], processList:[], editorProcess:null,
-    adminTab:'pending', adminPending:[], adminUsers:[], authError:'', showNewProcessModal:false };
+    adminTab:'pending', adminPending:[], adminUsers:[], authError:'', showNewProcessModal:false,
+    showNewDeptInline:false, lastCreatedDeptId:null, dashboardSearch:'', dashboardSort:'newest' };
+  render();
+}
+async function doForgotPassword(email){
+  state.authError = '';
+  if(!email){ state.authError = 'Please enter your email address.'; render(); return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.href.split('#')[0] });
+  if(error){ state.authError = error.message; render(); return; }
+  toast('If that email is registered, a reset link has been sent.');
+  state.screen = 'login'; render();
+}
+async function doUpdatePassword(newPassword){
+  state.authError = '';
+  if(!newPassword || newPassword.length < 6){ state.authError = 'At least 6 characters.'; render(); return; }
+  const { error } = await sb.auth.updateUser({ password: newPassword });
+  if(error){ state.authError = error.message; render(); return; }
+  toast('Password changed — you are logged in.');
+  const { data: { session } } = await sb.auth.getSession();
+  state.user = session.user;
+  await loadMyProfile();
   render();
 }
 
@@ -245,8 +283,19 @@ async function createDepartment(name){
   if(!name.trim()) return;
   const { error } = await sb.from('departments').insert({ name: name.trim() });
   if(error){ toast(error.message); return; }
-  toast('Abteilung angelegt.');
+  toast('Department created.');
   await loadDepartments(); render();
+}
+async function createDepartmentInline(name){
+  if(!name.trim()){ toast('Please enter a name.'); return; }
+  const { data, error } = await sb.from('departments').insert({ name: name.trim() }).select().single();
+  if(error){ toast(error.message); return; }
+  state.departments.push(data);
+  state.departments.sort((a,b)=>a.name.localeCompare(b.name));
+  state.lastCreatedDeptId = data.id;
+  state.showNewDeptInline = false;
+  toast('Department created.');
+  render();
 }
 
 /* ================= DASHBOARD / PROCESS LIST ================= */
@@ -260,26 +309,27 @@ async function loadProcessList(){
 function openNewProcessModal(){ state.showNewProcessModal = true; render(); }
 function closeNewProcessModal(){ state.showNewProcessModal = false; render(); }
 async function createProcess(l1Name, departmentId){
-  if(!l1Name){ toast('Bitte einen Mega-Cycle wählen.'); return; }
+  if(!l1Name){ toast('Please choose a mega-cycle.'); return; }
   const dept = departmentId || state.profile.department_id;
-  if(!dept){ toast('Bitte eine Abteilung wählen.'); return; }
+  if(!dept){ toast('Please choose a department.'); return; }
   const { data, error } = await sb.from('processes')
     .insert({ l1_name: l1Name, department_id: dept, created_by: state.profile.id })
     .select().single();
   if(error){ toast(error.message); return; }
   state.showNewProcessModal = false;
-  toast('Prozess angelegt.');
+  toast('Process created.');
   await openEditor(data.id);
 }
 async function deleteProcess(id){
   const { error } = await sb.from('processes').delete().eq('id', id);
   if(error){ toast(error.message); return; }
-  toast('Prozess gelöscht.');
+  toast('Process deleted.');
   await loadProcessList(); render();
 }
 
 /* ================= EDITOR ================= */
 async function openEditor(processId){
+  state.screen = 'loading'; render();
   const { data, error } = await sb.from('processes').select(`
       id, l1_name, department_id, created_by, l1_locked, l2_locked, l3_locked, l4_locked, created_at,
       subprocesses ( id, name, position,
@@ -290,7 +340,7 @@ async function openEditor(processId){
         )
       )
     `).eq('id', processId).single();
-  if(error){ toast(error.message); return; }
+  if(error){ toast(error.message); state.screen = 'dashboard'; render(); return; }
   data.subprocesses = data.subprocesses || [];
   data.subprocesses.forEach(sp=>{
     sp.steps = sp.steps || [];
@@ -358,6 +408,7 @@ async function addSubprocess(){
   renderEditor();
 }
 async function removeSubprocess(spId){
+  if(!window.confirm('Delete this sub-process? All steps, tasks and work instructions inside it will be lost too.')) return;
   await sb.from('subprocesses').delete().eq('id', spId);
   state.editorProcess.subprocesses = state.editorProcess.subprocesses.filter(s=>s.id!==spId);
   renderEditor();
@@ -381,6 +432,7 @@ async function addStep(spId){
   renderEditor();
 }
 async function removeStep(spId, stepId){
+  if(!window.confirm('Delete this step? All tasks and work instructions inside it will be lost too.')) return;
   await sb.from('steps').delete().eq('id', stepId);
   const sp = findSp(spId);
   sp.steps = sp.steps.filter(s=>s.id!==stepId);
@@ -411,6 +463,7 @@ async function addTask(spId, stepId){
   renderEditor();
 }
 async function removeTask(spId, stepId, taskId){
+  if(!window.confirm('Delete this task? All work instructions inside it will be lost too.')) return;
   await sb.from('tasks').delete().eq('id', taskId);
   const st = findStep(spId, stepId);
   st.tasks = st.tasks.filter(t=>t.id!==taskId);
@@ -425,6 +478,7 @@ async function addWI(spId, stepId, taskId){
   renderEditor();
 }
 async function removeWI(spId, stepId, taskId, wiId){
+  if(!window.confirm('Delete this work instruction?')) return;
   await sb.from('work_instructions').delete().eq('id', wiId);
   const task = findTask(spId, stepId, taskId);
   task.work_instructions = task.work_instructions.filter(w=>w.id!==wiId);
@@ -464,7 +518,7 @@ async function exportExcel(processIdOnly){
       (sp.steps||[]).sort((a,b)=>a.position-b.position).forEach(st=>{
         if(!st.text || !st.text.trim()) return;
         const base = {
-          "Abteilung": proc.departments ? proc.departments.name : '',
+          "Department": proc.departments ? proc.departments.name : '',
           "L1 Mega-cycle": proc.l1_name,
           "L2 Sub-process": sp.name,
           "L3 Process step": st.text,
@@ -484,19 +538,20 @@ async function exportExcel(processIdOnly){
       });
     });
   });
-  if(rows.length===0){ toast('Nichts zu exportieren.'); return; }
+  if(rows.length===0){ toast('Nothing to export.'); return; }
   const ws = XLSX.utils.json_to_sheet(rows);
   ws['!cols'] = [{wch:16},{wch:20},{wch:20},{wch:26},{wch:12},{wch:26},{wch:16},{wch:16},{wch:16}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Process Capture");
   XLSX.writeFile(wb, "Velogy_Process_Capture.xlsx");
-  toast('Exportiert.');
+  toast('Exported.');
 }
 
 /* ================= ADMIN ================= */
 async function openAdmin(){
-  state.screen = 'admin';
+  state.screen = 'loading'; render();
   await loadAdminData();
+  state.screen = 'admin';
   render();
 }
 async function loadAdminData(){
@@ -510,16 +565,16 @@ function setAdminTab(tab){ state.adminTab = tab; render(); }
 async function approveUser(id){
   const dept = document.getElementById('dept-'+id).value;
   const role = document.getElementById('role-'+id).value;
-  if(!dept){ toast('Bitte eine Abteilung wählen.'); return; }
+  if(!dept){ toast('Please choose a department.'); return; }
   const { error } = await sb.from('profiles').update({ department_id: dept, role, status:'approved' }).eq('id', id);
   if(error){ toast(error.message); return; }
-  toast('Nutzer freigegeben.');
+  toast('User approved.');
   await loadAdminData(); render();
 }
 async function rejectUser(id){
   const { error } = await sb.from('profiles').update({ status:'rejected' }).eq('id', id);
   if(error){ toast(error.message); return; }
-  toast('Anfrage abgelehnt.');
+  toast('Request rejected.');
   await loadAdminData(); render();
 }
 async function updateUser(id){
@@ -528,16 +583,25 @@ async function updateUser(id){
   const status = document.getElementById('ustatus-'+id).value;
   const { error } = await sb.from('profiles').update({ department_id: dept, role, status }).eq('id', id);
   if(error){ toast(error.message); return; }
-  toast('Gespeichert.');
+  toast('Saved.');
   await loadAdminData(); render();
 }
 
 /* ================= RENDER ================= */
 function render(){
   const app = document.getElementById('app');
-  if(state.screen==='loading') app.innerHTML = `<div class="center-wrap"><div class="auth-card" style="text-align:center;">Lädt…</div></div>`;
+  if(state.screen==='loading') app.innerHTML = `<div class="center-wrap"><div class="auth-card status-box"><div class="spinner"></div>Loading…</div></div>`;
+  else if(state.screen==='connection-error') app.innerHTML = `<div class="center-wrap"><div class="auth-card status-box">
+      <div class="status-icon">⚠️</div>
+      <h2>Connection failed</h2>
+      <p class="sub">The tool couldn't connect to the database. Check your internet connection and try again.</p>
+      ${state.authError ? `<div class="auth-error" style="text-align:left;">${escapeHtml(state.authError)}</div>` : ''}
+      <button class="full-btn" onclick="state.screen='loading'; render(); init();">Try again</button>
+    </div></div>`;
   else if(state.screen==='login') app.innerHTML = renderLogin();
   else if(state.screen==='signup') app.innerHTML = renderSignup();
+  else if(state.screen==='forgot') app.innerHTML = renderForgot();
+  else if(state.screen==='reset-password') app.innerHTML = renderResetPassword();
   else if(state.screen==='pending') app.innerHTML = renderPending();
   else if(state.screen==='rejected') app.innerHTML = renderRejected();
   else if(state.screen==='dashboard') app.innerHTML = renderDashboard();
@@ -550,7 +614,7 @@ function renderHeader(activeLabel){
   return `<div class="header">
     <div class="brand">
       <div class="logo">▶</div>
-      <div><h1>Velogy — Process Capture</h1><p>Layer-by-layer process aufnahme · Phase 1 tool for Process Owners</p></div>
+      <div><h1>Velogy — Process Capture</h1><p>Layer-by-layer process capture · Phase 1 tool for Process Owners</p></div>
     </div>
     <div class="actions">
       <span class="pill ${roleClass}">${escapeHtml(state.profile.role)}</span>
@@ -563,27 +627,49 @@ function renderHeader(activeLabel){
 
 function renderLogin(){
   return `<div class="center-wrap"><div class="auth-card">
-    <h2>Anmelden</h2><p class="sub">Zugang zum Velogy Process Capture Tool</p>
+    <h2>Log in</h2><p class="sub">Access to the Velogy Process Capture tool</p>
     ${state.authError ? `<div class="auth-error">${escapeHtml(state.authError)}</div>` : ''}
-    <div class="field"><label>E-Mail</label><input type="email" id="login-email" placeholder="name@firma.de"></div>
-    <div class="field"><label>Passwort</label><input type="password" id="login-password"></div>
-    <button class="full-btn" onclick="doSignIn(document.getElementById('login-email').value, document.getElementById('login-password').value)">Einloggen</button>
-    <div style="text-align:center; margin-top:14px;">
-      <button class="link-btn" onclick="state.screen='signup'; state.authError=''; render();">Noch keinen Zugang? Zugang anfragen</button>
+    <div class="field"><label>Email</label><input type="email" id="login-email" placeholder="name@company.com"></div>
+    <div class="field"><label>Password</label><input type="password" id="login-password"></div>
+    <button class="full-btn" onclick="doSignIn(document.getElementById('login-email').value, document.getElementById('login-password').value)">Log in</button>
+    <div style="text-align:center; margin-top:14px; display:flex; flex-direction:column; gap:6px;">
+      <button class="link-btn" onclick="state.screen='signup'; state.authError=''; render();">No access yet? Request access</button>
+      <button class="link-btn" onclick="state.screen='forgot'; state.authError=''; render();">Forgot password?</button>
     </div>
+  </div></div>`;
+}
+
+function renderForgot(){
+  return `<div class="center-wrap"><div class="auth-card">
+    <h2>Forgot password</h2><p class="sub">Enter your email address and we'll send you a reset link.</p>
+    ${state.authError ? `<div class="auth-error">${escapeHtml(state.authError)}</div>` : ''}
+    <div class="field"><label>Email</label><input type="email" id="forgot-email" placeholder="name@company.com"></div>
+    <button class="full-btn" onclick="doForgotPassword(document.getElementById('forgot-email').value)">Send link</button>
+    <div style="text-align:center; margin-top:14px;">
+      <button class="link-btn" onclick="state.screen='login'; state.authError=''; render();">Back to login</button>
+    </div>
+  </div></div>`;
+}
+
+function renderResetPassword(){
+  return `<div class="center-wrap"><div class="auth-card">
+    <h2>Set new password</h2><p class="sub">You got here via the email link — set a new password now.</p>
+    ${state.authError ? `<div class="auth-error">${escapeHtml(state.authError)}</div>` : ''}
+    <div class="field"><label>New password</label><input type="password" id="reset-password"></div>
+    <button class="full-btn" onclick="doUpdatePassword(document.getElementById('reset-password').value)">Save password</button>
   </div></div>`;
 }
 
 function renderSignup(){
   return `<div class="center-wrap"><div class="auth-card">
-    <h2>Zugang anfragen</h2><p class="sub">Ein Admin muss deine Anfrage noch freigeben, bevor du loslegen kannst.</p>
+    <h2>Request access</h2><p class="sub">An admin still needs to approve your request before you can get started.</p>
     ${state.authError ? `<div class="auth-error">${escapeHtml(state.authError)}</div>` : ''}
-    <div class="field"><label>Name</label><input type="text" id="su-name" placeholder="Max Mustermann"></div>
-    <div class="field"><label>E-Mail</label><input type="email" id="su-email" placeholder="name@firma.de"></div>
-    <div class="field"><label>Passwort</label><input type="password" id="su-password"></div>
-    <button class="full-btn" onclick="doSignUp(document.getElementById('su-email').value, document.getElementById('su-password').value, document.getElementById('su-name').value)">Zugang anfragen</button>
+    <div class="field"><label>Name</label><input type="text" id="su-name" placeholder="Jane Doe"></div>
+    <div class="field"><label>Email</label><input type="email" id="su-email" placeholder="name@company.com"></div>
+    <div class="field"><label>Password</label><input type="password" id="su-password"></div>
+    <button class="full-btn" onclick="doSignUp(document.getElementById('su-email').value, document.getElementById('su-password').value, document.getElementById('su-name').value)">Request access</button>
     <div style="text-align:center; margin-top:14px;">
-      <button class="link-btn" onclick="state.screen='login'; state.authError=''; render();">Schon einen Zugang? Einloggen</button>
+      <button class="link-btn" onclick="state.screen='login'; state.authError=''; render();">Already have access? Log in</button>
     </div>
   </div></div>`;
 }
@@ -591,74 +677,123 @@ function renderSignup(){
 function renderPending(){
   return `<div class="center-wrap"><div class="auth-card status-box">
     <div class="status-icon">⏳</div>
-    <h2>Zugang angefragt</h2>
-    <p class="sub">Ein Admin muss deinen Zugang noch freigeben. Du bekommst dann Zugriff auf deine Abteilung.</p>
-    <button class="btn btn-ghost" onclick="doSignOut()">Ausloggen</button>
+    <h2>Access requested</h2>
+    <p class="sub">An admin still needs to approve your access. You'll get access to your department once approved.</p>
+    <button class="btn btn-ghost" onclick="doSignOut()">Log out</button>
   </div></div>`;
 }
 function renderRejected(){
   return `<div class="center-wrap"><div class="auth-card status-box">
     <div class="status-icon">🚫</div>
-    <h2>Zugang abgelehnt</h2>
-    <p class="sub">Dein Zugang wurde nicht freigegeben. Wende dich an deinen Admin, falls das ein Irrtum ist.</p>
-    <button class="btn btn-ghost" onclick="doSignOut()">Ausloggen</button>
+    <h2>Access denied</h2>
+    <p class="sub">Your access request wasn't approved. Contact your admin if you think this is a mistake.</p>
+    <button class="btn btn-ghost" onclick="doSignOut()">Log out</button>
   </div></div>`;
 }
 
 function renderDashboard(){
-  const list = state.processList;
+  let list = [...state.processList];
+  const q = (state.dashboardSearch || '').trim().toLowerCase();
+  if(q){
+    list = list.filter(p =>
+      p.l1_name.toLowerCase().includes(q) ||
+      (p.departments && p.departments.name.toLowerCase().includes(q))
+    );
+  }
+  if(state.dashboardSort === 'newest') list.sort((a,b)=> new Date(b.created_at)-new Date(a.created_at));
+  else if(state.dashboardSort === 'oldest') list.sort((a,b)=> new Date(a.created_at)-new Date(b.created_at));
+  else if(state.dashboardSort === 'name') list.sort((a,b)=> a.l1_name.localeCompare(b.l1_name));
+  else if(state.dashboardSort === 'department') list.sort((a,b)=> (a.departments?.name||'').localeCompare(b.departments?.name||''));
+
   return `<div class="wrap">
     ${renderHeader()}
     <div class="header" style="padding:14px 24px;">
-      <div style="font-weight:700; font-size:15px;">Prozesse — ${state.profile.role==='admin' ? 'alle Abteilungen' : 'deine Abteilung'}</div>
+      <div style="font-weight:700; font-size:15px;">Processes — ${state.profile.role==='admin' ? 'all departments' : 'your department'}</div>
       <div class="actions">
-        <button class="btn btn-primary" onclick="openNewProcessModal()">+ Neuer Prozess</button>
+        <button class="btn btn-primary" onclick="openNewProcessModal()">+ New Process</button>
         <button class="btn btn-ghost" onclick="exportExcel()">⭳ Export to Excel</button>
       </div>
     </div>
-    <div class="dash-list">
-      ${list.length===0 ? `<div class="empty-note" style="text-align:center; padding:40px;">Noch keine Prozesse — leg den ersten mit "+ Neuer Prozess" an.</div>` : ''}
-      ${list.map(p=>`
+    <div class="header" style="padding:12px 24px; gap:10px;">
+      <input type="text" placeholder="Search by mega-cycle or department…" value="${escapeHtml(state.dashboardSearch)}"
+        style="max-width:320px;" oninput="state.dashboardSearch=this.value; renderDashboardListOnly();">
+      <select style="max-width:200px;" onchange="state.dashboardSort=this.value; render();">
+        <option value="newest" ${state.dashboardSort==='newest'?'selected':''}>Newest first</option>
+        <option value="oldest" ${state.dashboardSort==='oldest'?'selected':''}>Oldest first</option>
+        <option value="name" ${state.dashboardSort==='name'?'selected':''}>By mega-cycle (A-Z)</option>
+        <option value="department" ${state.dashboardSort==='department'?'selected':''}>By department (A-Z)</option>
+      </select>
+    </div>
+    <div class="dash-list" id="dashList">
+      ${renderDashList(list)}
+    </div>
+  </div>
+  ${state.showNewProcessModal ? renderNewProcessModal() : ''}`;
+}
+
+function renderDashList(list){
+  if(list.length===0) return `<div class="empty-note" style="text-align:center; padding:40px;">${state.processList.length===0 ? 'No processes yet — create the first one with "+ New Process".' : 'No processes found.'}</div>`;
+  return list.map(p=>`
         <div class="dash-item">
           <div>
             <h3>${escapeHtml(p.l1_name)}</h3>
-            <div class="meta">${escapeHtml(p.departments ? p.departments.name : '')} · angelegt ${new Date(p.created_at).toLocaleDateString('de-DE')}</div>
+            <div class="meta">${escapeHtml(p.departments ? p.departments.name : '')} · created ${new Date(p.created_at).toLocaleDateString('en-US')}</div>
             <div class="progress-dots">
               <div class="dot ${p.l1_locked?'on':''}"></div><div class="dot ${p.l2_locked?'on':''}"></div>
               <div class="dot ${p.l3_locked?'on':''}"></div><div class="dot ${p.l4_locked?'on':''}"></div>
             </div>
           </div>
           <div class="actions">
-            <button class="btn btn-primary" onclick="openEditor('${p.id}')">Öffnen</button>
+            <button class="btn btn-primary" onclick="openEditor('${p.id}')">Open</button>
             <button class="btn btn-ghost" onclick="exportExcel('${p.id}')">Export</button>
-            ${(state.profile.role==='admin') ? `<button class="btn btn-danger" onclick="if(window.confirm('Prozess wirklich löschen?')) deleteProcess('${p.id}')">Löschen</button>` : ''}
+            ${(state.profile.role==='admin') ? `<button class="btn btn-danger" onclick="if(window.confirm('Delete this process?')) deleteProcess('${p.id}')">Delete</button>` : ''}
           </div>
         </div>
-      `).join('')}
-    </div>
-  </div>
-  ${state.showNewProcessModal ? renderNewProcessModal() : ''}`;
+      `).join('');
+}
+
+function renderDashboardListOnly(){
+  let list = [...state.processList];
+  const q = (state.dashboardSearch || '').trim().toLowerCase();
+  if(q){
+    list = list.filter(p =>
+      p.l1_name.toLowerCase().includes(q) ||
+      (p.departments && p.departments.name.toLowerCase().includes(q))
+    );
+  }
+  if(state.dashboardSort === 'newest') list.sort((a,b)=> new Date(b.created_at)-new Date(a.created_at));
+  else if(state.dashboardSort === 'oldest') list.sort((a,b)=> new Date(a.created_at)-new Date(b.created_at));
+  else if(state.dashboardSort === 'name') list.sort((a,b)=> a.l1_name.localeCompare(b.l1_name));
+  else if(state.dashboardSort === 'department') list.sort((a,b)=> (a.departments?.name||'').localeCompare(b.departments?.name||''));
+  const el = document.getElementById('dashList');
+  if(el) el.innerHTML = renderDashList(list);
 }
 
 function renderNewProcessModal(){
   const showDeptPicker = state.profile.role==='admin';
   return `<div class="modal-overlay" onclick="if(event.target===this) closeNewProcessModal()">
     <div class="modal">
-      <h3>Neuen Prozess anlegen</h3>
+      <h3>Create new process</h3>
       <div class="field"><label>Mega-cycle (L1)</label>
         <select id="np-l1">
-          <option value="">— auswählen —</option>
+          <option value="">— choose —</option>
           ${MEGA_CYCLES.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}
         </select>
       </div>
-      ${showDeptPicker ? `<div class="field"><label>Abteilung</label>
+      ${showDeptPicker ? `<div class="field"><label>Department</label>
         <select id="np-dept">
-          <option value="">— auswählen —</option>
-          ${state.departments.map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('')}
+          <option value="">— choose —</option>
+          ${state.departments.map(d=>`<option value="${d.id}" ${state.lastCreatedDeptId===d.id?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}
         </select>
+        ${state.showNewDeptInline
+          ? `<div class="row-input" style="margin-top:8px;">
+              <input type="text" id="np-new-dept" placeholder="New department name">
+              <button class="btn btn-primary" style="flex-shrink:0;" onclick="createDepartmentInline(document.getElementById('np-new-dept').value)">OK</button>
+            </div>`
+          : `<button class="link-btn" style="margin-top:6px;" onclick="state.showNewDeptInline=true; render();">+ create new department</button>`}
       </div>` : ''}
-      <button class="full-btn" onclick="createProcess(document.getElementById('np-l1').value, ${showDeptPicker ? "document.getElementById('np-dept').value" : "null"})">Anlegen</button>
-      <button class="link-btn" style="margin-top:10px;" onclick="closeNewProcessModal()">Abbrechen</button>
+      <button class="full-btn" onclick="createProcess(document.getElementById('np-l1').value, ${showDeptPicker ? "document.getElementById('np-dept').value" : "null"})">Create</button>
+      <button class="link-btn" style="margin-top:10px;" onclick="closeNewProcessModal()">Cancel</button>
     </div>
   </div>`;
 }
@@ -668,13 +803,13 @@ function renderAdmin(){
     ${renderHeader()}
     <div class="header" style="padding:14px 24px;">
       <div style="font-weight:700; font-size:15px;">Admin</div>
-      <button class="btn btn-ghost" onclick="backToDashboard()">← Zurück zum Dashboard</button>
+      <button class="btn btn-ghost" onclick="backToDashboard()">← Back to dashboard</button>
     </div>
     <div class="card">
       <div class="tabs">
-        <div class="tab ${state.adminTab==='pending'?'active':''}" onclick="setAdminTab('pending')">Offene Anfragen (${state.adminPending.length})</div>
-        <div class="tab ${state.adminTab==='users'?'active':''}" onclick="setAdminTab('users')">Nutzer</div>
-        <div class="tab ${state.adminTab==='depts'?'active':''}" onclick="setAdminTab('depts')">Abteilungen</div>
+        <div class="tab ${state.adminTab==='pending'?'active':''}" onclick="setAdminTab('pending')">Pending requests (${state.adminPending.length})</div>
+        <div class="tab ${state.adminTab==='users'?'active':''}" onclick="setAdminTab('users')">Users</div>
+        <div class="tab ${state.adminTab==='depts'?'active':''}" onclick="setAdminTab('depts')">Departments</div>
       </div>
       ${state.adminTab==='pending' ? renderAdminPending() : ''}
       ${state.adminTab==='users' ? renderAdminUsers() : ''}
@@ -683,28 +818,28 @@ function renderAdmin(){
   </div>`;
 }
 function renderAdminPending(){
-  if(state.adminPending.length===0) return `<div class="empty-note">Keine offenen Anfragen.</div>`;
+  if(state.adminPending.length===0) return `<div class="empty-note">No pending requests.</div>`;
   return `<table class="admin-table"><thead><tr>
-    <th>Name</th><th>E-Mail</th><th>Abteilung</th><th>Rolle</th><th></th>
+    <th>Name</th><th>Email</th><th>Department</th><th>Role</th><th></th>
   </tr></thead><tbody>
   ${state.adminPending.map(u=>`
     <tr>
       <td>${escapeHtml(u.full_name || '—')}</td>
       <td>${escapeHtml(u.email || '')}</td>
-      <td><select id="dept-${u.id}"><option value="">— wählen —</option>${state.departments.map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('')}</select></td>
+      <td><select id="dept-${u.id}"><option value="">— choose —</option>${state.departments.map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('')}</select></td>
       <td><select id="role-${u.id}"><option value="viewer">viewer</option><option value="process_owner">process_owner</option><option value="admin">admin</option></select></td>
       <td style="white-space:nowrap;">
-        <button class="btn btn-primary" onclick="approveUser('${u.id}')">Freigeben</button>
-        <button class="btn btn-danger" onclick="rejectUser('${u.id}')">Ablehnen</button>
+        <button class="btn btn-primary" onclick="approveUser('${u.id}')">Approve</button>
+        <button class="btn btn-danger" onclick="rejectUser('${u.id}')">Reject</button>
       </td>
     </tr>
   `).join('')}
   </tbody></table>`;
 }
 function renderAdminUsers(){
-  if(state.adminUsers.length===0) return `<div class="empty-note">Noch keine Nutzer.</div>`;
+  if(state.adminUsers.length===0) return `<div class="empty-note">No users yet.</div>`;
   return `<table class="admin-table"><thead><tr>
-    <th>Name</th><th>E-Mail</th><th>Abteilung</th><th>Rolle</th><th>Status</th><th></th>
+    <th>Name</th><th>Email</th><th>Department</th><th>Role</th><th>Status</th><th></th>
   </tr></thead><tbody>
   ${state.adminUsers.map(u=>`
     <tr>
@@ -720,17 +855,17 @@ function renderAdminUsers(){
         <option value="approved" ${u.status==='approved'?'selected':''}>approved</option>
         <option value="rejected" ${u.status==='rejected'?'selected':''}>rejected</option>
       </select></td>
-      <td><button class="btn btn-primary" onclick="updateUser('${u.id}')">Speichern</button></td>
+      <td><button class="btn btn-primary" onclick="updateUser('${u.id}')">Save</button></td>
     </tr>
   `).join('')}
   </tbody></table>`;
 }
 function renderAdminDepts(){
   return `<div class="inline-form">
-      <input type="text" id="new-dept-name" placeholder="Neue Abteilung, z.B. Finance">
-      <button class="btn btn-primary" onclick="createDepartment(document.getElementById('new-dept-name').value); document.getElementById('new-dept-name').value='';">Anlegen</button>
+      <input type="text" id="new-dept-name" placeholder="New department, e.g. Finance">
+      <button class="btn btn-primary" onclick="createDepartment(document.getElementById('new-dept-name').value); document.getElementById('new-dept-name').value='';">Create</button>
     </div>
-    <table class="admin-table"><thead><tr><th>Abteilung</th></tr></thead><tbody>
+    <table class="admin-table"><thead><tr><th>Department</th></tr></thead><tbody>
       ${state.departments.map(d=>`<tr><td>${escapeHtml(d.name)}</td></tr>`).join('')}
     </tbody></table>`;
 }
@@ -741,9 +876,9 @@ function renderEditor(){
   app.innerHTML = `<div class="wrap">
     ${renderHeader()}
     <div class="header" style="padding:14px 24px;">
-      <div style="font-weight:700; font-size:15px;">${escapeHtml(state.editorProcess.l1_name || 'Neuer Prozess')}</div>
+      <div style="font-weight:700; font-size:15px;">${escapeHtml(state.editorProcess.l1_name || 'New process')}</div>
       <div class="actions">
-        <button class="btn btn-ghost" onclick="backToDashboard()">← Zurück</button>
+        <button class="btn btn-ghost" onclick="backToDashboard()">← Back</button>
         <button class="btn btn-ghost" onclick="exportExcel(state.editorProcess.id)">⭳ Export</button>
       </div>
     </div>
@@ -751,7 +886,7 @@ function renderEditor(){
       <div id="editorLeft"></div>
       <div class="card" style="position:sticky; top:20px;">
         <div class="card-title" style="font-size:16px; margin-bottom:2px;">Process tree — live preview</div>
-        <div class="card-hint" style="margin-bottom:0;">Diese Ansicht aktualisiert sich live, während du ausfüllst.</div>
+        <div class="card-hint" style="margin-bottom:0;">This view updates live as you fill things in.</div>
         <div class="stats" id="stats"></div>
         <div id="treeBody"></div>
       </div>
@@ -787,7 +922,7 @@ function renderEditorLeftPanel(){
     <span class="card-hint">short noun phrases</span></div>`;
   if(!p.l1_locked){ html += `<div class="empty-note">Lock L1 first to add sub-processes.</div>`; }
   else {
-    if(p.subprocesses.length===0) html += `<div class="empty-note">Noch keine Sub-Prozesse.</div>`;
+    if(p.subprocesses.length===0) html += `<div class="empty-note">No sub-processes yet.</div>`;
     p.subprocesses.forEach(sp=>{
       html += `<div class="row-input">
         <input type="text" placeholder="e.g. Order management" value="${escapeHtml(sp.name)}" ${p.l2_locked?'disabled':''} oninput="onSubName('${sp.id}', this.value)">
@@ -806,7 +941,7 @@ function renderEditorLeftPanel(){
   else {
     p.subprocesses.forEach(sp=>{
       html += `<div class="subblock"><div class="subblock-title">${escapeHtml(sp.name)}</div>`;
-      if(sp.steps.length===0 && !p.l3_locked) html += `<div class="empty-note">Noch keine Steps.</div>`;
+      if(sp.steps.length===0 && !p.l3_locked) html += `<div class="empty-note">No steps yet.</div>`;
       sp.steps.forEach(st=>{
         if(!p.l3_locked){
           html += `<div class="row-input">
@@ -917,7 +1052,7 @@ function updateEditorTree(){
     h += `</div>`;
   }
   const treeEl = document.getElementById('treeBody');
-  if(treeEl) treeEl.innerHTML = h.trim() ? h : `<div class="tree-empty">Wähle L1, um zu starten.</div>`;
+  if(treeEl) treeEl.innerHTML = h.trim() ? h : `<div class="tree-empty">Choose L1 to get started.</div>`;
 }
 
 init();
