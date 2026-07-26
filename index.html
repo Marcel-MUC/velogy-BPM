@@ -170,6 +170,8 @@ let state = {
   processList: [],
   editorProcess: null,
   editorSelectedSpId: null,
+  editorSelectedStepId: null,
+  editorSelectedTaskId: null,
   adminTab: 'pending',
   adminPending: [],
   adminUsers: [],
@@ -257,6 +259,8 @@ async function doSignOut(){
   await sb.auth.signOut();
   state = { screen:'login', user:null, profile:null, departments:[], processList:[], editorProcess:null,
     editorSelectedSpId:null,
+    editorSelectedStepId:null,
+    editorSelectedTaskId:null,
     adminTab:'pending', adminPending:[], adminUsers:[], authError:'', showNewProcessModal:false,
     showNewDeptInline:false, lastCreatedDeptId:null, dashboardSearch:'', dashboardSort:'newest' };
   render();
@@ -308,7 +312,7 @@ async function createDepartmentInline(name){
 /* ================= DASHBOARD / PROCESS LIST ================= */
 async function loadProcessList(){
   const { data, error } = await sb.from('processes')
-    .select('id, l1_name, department_id, l1_locked, l2_locked, created_at, departments(name), subprocesses(l3_locked, l4_locked)')
+    .select('id, l1_name, department_id, l1_locked, l2_locked, created_at, departments(name), subprocesses(l3_locked, steps(classification, l4_locked))')
     .order('created_at', { ascending:false });
   if(error){ toast(error.message); return; }
   state.processList = data || [];
@@ -340,7 +344,7 @@ async function openEditor(processId){
   const { data, error } = await sb.from('processes').select(`
       id, l1_name, department_id, created_by, l1_locked, l2_locked, l3_locked, l4_locked, created_at,
       subprocesses ( id, name, position, l3_locked, l4_locked,
-        steps ( id, text, classification, position,
+        steps ( id, text, classification, position, l4_locked,
           tasks ( id, text, position,
             work_instructions ( id, transaction, field, tool, position )
           )
@@ -358,6 +362,8 @@ async function openEditor(processId){
   });
   state.editorProcess = sortTree(data);
   state.editorSelectedSpId = null;
+  state.editorSelectedStepId = null;
+  state.editorSelectedTaskId = null;
   state.screen = 'editor';
   render();
 }
@@ -368,10 +374,21 @@ function backToDashboard(){
 function findSp(spId){ return state.editorProcess.subprocesses.find(s=>s.id===spId); }
 function toggleSpSelection(spId){
   state.editorSelectedSpId = (state.editorSelectedSpId === spId) ? null : spId;
+  state.editorSelectedStepId = null;
+  state.editorSelectedTaskId = null;
   renderEditorLeftPanel();
 }
 function findStep(spId, stepId){ return findSp(spId).steps.find(s=>s.id===stepId); }
 function findTask(spId, stepId, taskId){ return findStep(spId, stepId).tasks.find(t=>t.id===taskId); }
+function toggleStepSelection(stepId){
+  state.editorSelectedStepId = (state.editorSelectedStepId === stepId) ? null : stepId;
+  state.editorSelectedTaskId = null;
+  renderEditorLeftPanel();
+}
+function toggleTaskSelection(taskId){
+  state.editorSelectedTaskId = (state.editorSelectedTaskId === taskId) ? null : taskId;
+  renderEditorLeftPanel();
+}
 function getCriticalSteps(){
   const out = [];
   state.editorProcess.subprocesses.forEach(sp=> sp.steps.forEach(st=>{
@@ -497,23 +514,16 @@ async function removeWI(spId, stepId, taskId, wiId){
   task.work_instructions = task.work_instructions.filter(w=>w.id!==wiId);
   renderEditor();
 }
-function stepReadyForL4Lock(step){
-  if(step.classification !== 'critical') return true;
-  const validTasks = step.tasks.filter(t=>t.text.trim());
-  if(validTasks.length===0) return false;
-  return validTasks.every(t => t.work_instructions.some(wi=>wi.transaction.trim()||wi.field.trim()||wi.tool.trim()));
-}
-async function lockL4ForSp(spId){
-  const sp = findSp(spId);
-  const criticalInSp = sp.steps.filter(s=>s.classification==='critical');
-  if(!criticalInSp.every(stepReadyForL4Lock)) return;
-  const { error } = await sb.from('subprocesses').update({ l4_locked:true }).eq('id', spId);
+async function lockL4ForStep(spId, stepId){
+  const step = findStep(spId, stepId);
+  if(!step.tasks.some(t=>t.text.trim())) return;
+  const { error } = await sb.from('steps').update({ l4_locked:true }).eq('id', stepId);
   if(error){ toast(error.message); return; }
-  sp.l4_locked = true; renderEditor();
+  step.l4_locked = true; renderEditor();
 }
-async function unlockL4ForSp(spId){
-  await sb.from('subprocesses').update({ l4_locked:false }).eq('id', spId);
-  findSp(spId).l4_locked = false; renderEditor();
+async function unlockL4ForStep(spId, stepId){
+  await sb.from('steps').update({ l4_locked:false }).eq('id', stepId);
+  findStep(spId, stepId).l4_locked = false; renderEditor();
 }
 
 /* ================= EXCEL EXPORT ================= */
@@ -755,7 +765,7 @@ function renderDashList(list){
   if(list.length===0) return `<div class="empty-note" style="text-align:center; padding:40px;">${state.processList.length===0 ? 'No processes yet — create the first one with "+ New Process".' : 'No processes found.'}</div>`;
   return list.map(p=>{
     const subs = p.subprocesses || [];
-    const doneCount = subs.filter(sp=>sp.l4_locked).length;
+    const doneCount = subs.filter(sp=> sp.l3_locked && (sp.steps||[]).filter(st=>st.classification==='critical').every(st=>st.l4_locked)).length;
     return `
         <div class="dash-item">
           <div>
@@ -923,10 +933,14 @@ function renderEditor(){
 function renderEditorLeftPanel(){
   const p = state.editorProcess;
   const selSp = p.l2_locked ? (p.subprocesses.find(s=>s.id===state.editorSelectedSpId) || null) : null;
+  const selStep = (selSp && selSp.l3_locked) ? (selSp.steps.find(s=>s.id===state.editorSelectedStepId) || null) : null;
+  const selTask = (selStep && selStep.l4_locked) ? (selStep.tasks.find(t=>t.id===state.editorSelectedTaskId) || null) : null;
+
   const c1 = p.l1_locked ? 'done' : 'active';
   const c2 = !p.l1_locked ? 'disabled' : (p.l2_locked ? 'done' : 'active');
   const c3 = !p.l2_locked ? 'disabled' : (!selSp ? 'disabled' : (selSp.l3_locked ? 'done' : 'active'));
-  const c4 = !p.l2_locked || !selSp ? 'disabled' : (!selSp.l3_locked ? 'disabled' : (selSp.l4_locked ? 'done' : 'active'));
+  const c4 = (!selSp || !selSp.l3_locked) ? 'disabled' : (!selStep ? 'disabled' : (selStep.classification!=='critical' ? 'disabled' : (selStep.l4_locked ? 'done' : 'active')));
+  const c5 = (!selStep || selStep.l4_locked!==true) ? 'disabled' : (selTask ? 'active' : 'disabled');
 
   let html = '';
 
@@ -956,7 +970,7 @@ function renderEditorLeftPanel(){
     });
     html += `<button class="link-btn" onclick="addSubprocess()">+ add sub-process</button>`;
   } else {
-    html += `<div class="empty-note" style="margin-bottom:8px;">Click a sub-process to work on it in L3 / L4. Click it again to switch to another one.</div>`;
+    html += `<div class="empty-note" style="margin-bottom:8px;">Click a sub-process to work on it in L3. Click it again to switch to another one.</div>`;
     p.subprocesses.forEach(sp=>{
       const isSel = sp.id === state.editorSelectedSpId;
       const hasSteps = sp.steps.some(s=>s.text.trim());
@@ -969,6 +983,7 @@ function renderEditorLeftPanel(){
   html += `<button class="lock-btn ${p.l2_locked?'done-btn':''}" ${p.l2_locked ? '' : (!p.l1_locked || !p.subprocesses.some(s=>s.name.trim()) ? 'disabled':'')} onclick="${p.l2_locked?'unlockL2()':'lockL2()'}">${p.l2_locked?'✓ Locked — click to edit':'Lock L2 → go to L3'}</button>
   </div>`;
 
+  /* ---------- L3: steps of the selected sub-process ---------- */
   html += `<div class="card ${c3}">
     <div class="card-head"><div class="card-head-left"><span class="badge ${p.l2_locked?'badge-navy':'badge-gray'}">L3</span><span class="card-title">Process steps</span></div>
     <span class="card-hint">verb first: "create...", "check..."</span></div>`;
@@ -976,79 +991,105 @@ function renderEditorLeftPanel(){
   else if(p.subprocesses.length===0){ html += `<div class="empty-note">No sub-processes yet — add one in L2 above.</div>`; }
   else if(!selSp){ html += `<div class="empty-note">Click a sub-process in L2 above to add its steps here.</div>`; }
   else {
-    html += `<div class="subblock"><div class="subblock-title">${escapeHtml(selSp.name || '(untitled)')}</div>`;
-    if(selSp.steps.length===0 && !selSp.l3_locked) html += `<div class="empty-note">No steps yet.</div>`;
-    selSp.steps.forEach(st=>{
-      if(!selSp.l3_locked){
+    html += `<div class="subblock-title" style="margin-bottom:10px;">${escapeHtml(selSp.name || '(untitled)')}</div>`;
+    if(!selSp.l3_locked){
+      if(selSp.steps.length===0) html += `<div class="empty-note">No steps yet.</div>`;
+      selSp.steps.forEach(st=>{
         html += `<div class="row-input">
           <input type="text" placeholder="e.g. Create sales order" value="${escapeHtml(st.text)}" oninput="onStepText('${selSp.id}','${st.id}', this.value)">
           <button class="icon-btn" onclick="removeStep('${selSp.id}','${st.id}')">✕</button>
         </div>`;
-      } else {
-        html += `<div class="step-line">
-          <div class="step-text">${escapeHtml(st.text)}</div>
-          <div class="cls-btns">
-            <button class="cls-btn critical ${st.classification==='critical'?'sel':''}" onclick="classifyStep('${selSp.id}','${st.id}','critical')">Critical</button>
-            <button class="cls-btn standard ${st.classification==='standard'?'sel':''}" onclick="classifyStep('${selSp.id}','${st.id}','standard')">Standard</button>
+      });
+      html += `<button class="link-btn" onclick="addStep('${selSp.id}')">+ add step</button>`;
+      const hasAnyStep = selSp.steps.some(s=>s.text.trim());
+      html += `<button class="lock-btn" ${!hasAnyStep ? 'disabled':''} onclick="lockL3ForSp('${selSp.id}')">Lock L3 → classify &amp; select a step</button>`;
+    } else {
+      html += `<div class="empty-note" style="margin-bottom:8px;">Classify each step, then click one to work on its tasks in L4.</div>`;
+      selSp.steps.forEach(st=>{
+        const isSel = st.id === state.editorSelectedStepId;
+        const hasTasks = st.tasks.some(t=>t.text.trim());
+        let badge;
+        if(isSel) badge = 'currently editing';
+        else if(st.classification==='critical') badge = hasTasks ? '✓ has tasks' : 'needs tasks';
+        else if(st.classification==='standard') badge = 'no tasks needed';
+        else badge = 'not classified';
+        html += `<div class="sp-row ${isSel?'sel':''}" onclick="toggleStepSelection('${st.id}')" style="flex-direction:column; align-items:stretch; gap:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+            <span>${escapeHtml(st.text)}</span>
+            <span style="font-size:11px; font-weight:600; opacity:.85; white-space:nowrap;">${badge}</span>
+          </div>
+          <div class="cls-btns" onclick="event.stopPropagation()">
+            <button class="cls-btn critical ${st.classification==='critical'?'sel':''}" onclick="event.stopPropagation(); classifyStep('${selSp.id}','${st.id}','critical')">Critical</button>
+            <button class="cls-btn standard ${st.classification==='standard'?'sel':''}" onclick="event.stopPropagation(); classifyStep('${selSp.id}','${st.id}','standard')">Standard</button>
           </div>
         </div>`;
-      }
-    });
-    if(!selSp.l3_locked) html += `<button class="link-btn" onclick="addStep('${selSp.id}')">+ add step</button>`;
-    html += `</div>`;
-    const hasAnyStep = selSp.steps.some(s=>s.text.trim());
-    html += `<button class="lock-btn ${selSp.l3_locked?'done-btn':''}" ${selSp.l3_locked ? '' : (!hasAnyStep ? 'disabled':'')} onclick="${selSp.l3_locked?`unlockL3ForSp('${selSp.id}')`:`lockL3ForSp('${selSp.id}')`}">${selSp.l3_locked?'✓ Locked — click to edit steps':'Lock L3 → classify critical / standard'}</button>`;
+      });
+      html += `<button class="lock-btn done-btn" onclick="unlockL3ForSp('${selSp.id}')">✓ Locked — click to edit steps</button>`;
+    }
   }
   html += `</div>`;
 
+  /* ---------- L4: tasks of the selected step ---------- */
   html += `<div class="card ${c4}">
     <div class="card-head"><div class="card-head-left"><span class="badge ${(selSp&&selSp.l3_locked)?'badge-navy':'badge-gray'}">L4</span><span class="card-title">Tasks (critical steps only)</span></div>
     <span class="card-hint">verb + object, e.g. "Enter customer ID"</span></div>`;
-  if(!p.l2_locked || p.subprocesses.length===0){ html += `<div class="empty-note">Lock L2 first, then select a sub-process.</div>`; }
-  else if(!selSp){ html += `<div class="empty-note">Click a sub-process in L2 above to work on its tasks here.</div>`; }
-  else if(!selSp.l3_locked){ html += `<div class="empty-note">Lock L3 for "${escapeHtml(selSp.name||'(untitled)')}" first, then classify its steps.</div>`; }
+  if(!selSp || !selSp.l3_locked){ html += `<div class="empty-note">Lock L3 for a sub-process first, then select a step.</div>`; }
+  else if(!selStep){ html += `<div class="empty-note">Click a step in L3 above to work on its tasks here.</div>`; }
+  else if(selStep.classification !== 'critical'){ html += `<div class="empty-note">"${escapeHtml(selStep.text)}" is standard — no tasks needed for this step.</div>`; }
   else {
-    const criticalInSp = selSp.steps.filter(s=>s.classification==='critical');
-    if(criticalInSp.length===0){ html += `<div class="empty-note">No critical steps in "${escapeHtml(selSp.name||'(untitled)')}" — nothing needed here for this sub-process.</div>`; }
-    criticalInSp.forEach(step=>{
-      html += `<div class="subblock"><div class="subblock-title">${escapeHtml(selSp.name)} <span class="tag tag-critical">critical</span><br><span style="font-weight:400; color:var(--gray-500); font-size:12px;">${escapeHtml(step.text)}</span></div>`;
-      step.tasks.forEach(task=>{
-        const taskNeedsWI = task.text.trim() && !task.work_instructions.some(wi=>wi.transaction.trim()||wi.field.trim()||wi.tool.trim());
-        html += `<div class="task-block">
-          <div class="row-input">
-            <input type="text" placeholder="e.g. Enter customer ID" value="${escapeHtml(task.text)}" ${selSp.l4_locked?'disabled':''} oninput="onTaskText('${selSp.id}','${step.id}','${task.id}', this.value)">
-            ${!selSp.l4_locked ? `<button class="icon-btn" onclick="removeTask('${selSp.id}','${step.id}','${task.id}')">✕</button>` : ''}
-          </div>
-          <div class="task-block-header">L5 work instructions <span style="opacity:.6;">(transaction · field · tool)</span>${taskNeedsWI ? ' <span class="tag tag-critical">needs at least 1</span>' : ''}</div>`;
-        task.work_instructions.forEach(wi=>{
-          html += `<div class="wi-row">
-            <input type="text" placeholder="Transaction" value="${escapeHtml(wi.transaction)}" ${selSp.l4_locked?'disabled':''} oninput="onWI('${selSp.id}','${step.id}','${task.id}','${wi.id}','transaction', this.value)">
-            <input type="text" placeholder="Field" value="${escapeHtml(wi.field)}" ${selSp.l4_locked?'disabled':''} oninput="onWI('${selSp.id}','${step.id}','${task.id}','${wi.id}','field', this.value)">
-            <input type="text" placeholder="Tool" value="${escapeHtml(wi.tool)}" ${selSp.l4_locked?'disabled':''} oninput="onWI('${selSp.id}','${step.id}','${task.id}','${wi.id}','tool', this.value)">
-            ${!selSp.l4_locked ? `<button class="icon-btn" onclick="removeWI('${selSp.id}','${step.id}','${task.id}','${wi.id}')">✕</button>` : `<span></span>`}
-          </div>`;
-        });
-        if(!selSp.l4_locked) html += `<button class="link-btn" onclick="addWI('${selSp.id}','${step.id}','${task.id}')">+ add work instruction</button>`;
-        html += `</div>`;
+    html += `<div class="subblock-title" style="margin-bottom:10px;">${escapeHtml(selStep.text)} <span class="tag tag-critical">critical</span></div>`;
+    if(!selStep.l4_locked){
+      if(selStep.tasks.length===0) html += `<div class="empty-note">No tasks yet.</div>`;
+      selStep.tasks.forEach(task=>{
+        html += `<div class="row-input">
+          <input type="text" placeholder="e.g. Enter customer ID" value="${escapeHtml(task.text)}" oninput="onTaskText('${selSp.id}','${selStep.id}','${task.id}', this.value)">
+          <button class="icon-btn" onclick="removeTask('${selSp.id}','${selStep.id}','${task.id}')">✕</button>
+        </div>`;
       });
-      if(!selSp.l4_locked) html += `<button class="link-btn" onclick="addTask('${selSp.id}','${step.id}')">+ add task</button>`;
-      html += `</div>`;
-    });
-    const okToLockL4 = criticalInSp.every(stepReadyForL4Lock);
-    html += `<button class="lock-btn ${selSp.l4_locked?'done-btn':''}" ${selSp.l4_locked ? '' : (!okToLockL4?'disabled':'')} onclick="${selSp.l4_locked?`unlockL4ForSp('${selSp.id}')`:`lockL4ForSp('${selSp.id}')`}">${selSp.l4_locked?'✓ Locked — click to edit':'Lock L4 → finish this sub-process'}</button>`;
+      html += `<button class="link-btn" onclick="addTask('${selSp.id}','${selStep.id}')">+ add task</button>`;
+      const hasAnyTask = selStep.tasks.some(t=>t.text.trim());
+      html += `<button class="lock-btn" ${!hasAnyTask ? 'disabled':''} onclick="lockL4ForStep('${selSp.id}','${selStep.id}')">Lock L4 → select a task for L5</button>`;
+    } else {
+      html += `<div class="empty-note" style="margin-bottom:8px;">Click a task to work on its work instructions in L5.</div>`;
+      selStep.tasks.forEach(task=>{
+        const isSel = task.id === state.editorSelectedTaskId;
+        const hasWI = task.work_instructions.some(wi=>wi.transaction.trim()||wi.field.trim()||wi.tool.trim());
+        html += `<div class="sp-row ${isSel?'sel':''}" onclick="toggleTaskSelection('${task.id}')">
+          <span>${escapeHtml(task.text)}</span>
+          <span style="font-size:11px; font-weight:600; opacity:.85;">${isSel ? 'currently editing' : (hasWI ? '✓ has instructions' : 'needs instructions')}</span>
+        </div>`;
+      });
+      html += `<button class="lock-btn done-btn" onclick="unlockL4ForStep('${selSp.id}','${selStep.id}')">✓ Locked — click to edit tasks</button>`;
+    }
   }
   html += `</div>`;
 
-  html += `<div class="card ${(selSp&&selSp.l4_locked)?'done':'disabled'}">
-    <div class="card-head"><div class="card-head-left"><span class="badge ${(selSp&&selSp.l4_locked)?'badge-green':'badge-gray'}">L5</span><span class="card-title">Work instructions</span></div>
-    <span class="card-hint">system-specific: transaction, field, tool</span></div>
-    <div class="empty-note" style="font-style:normal; color:var(--gray-500);">
-      ${(selSp&&selSp.l4_locked) ? '✓ Work instructions captured inside each L4 task card above.' : (selSp ? 'L5 lives inside each L4 task card. Fill them in the L4 section above.' : 'Select a sub-process in L2 above to see its L5 status here.')}
-    </div>
-  </div>`;
+  /* ---------- L5: work instructions of the selected task ---------- */
+  html += `<div class="card ${c5}">
+    <div class="card-head"><div class="card-head-left"><span class="badge ${selTask?'badge-green':'badge-gray'}">L5</span><span class="card-title">Work instructions</span></div>
+    <span class="card-hint">system-specific: transaction, field, tool</span></div>`;
+  if(!selStep || selStep.classification!=='critical' || !selStep.l4_locked){
+    html += `<div class="empty-note">Lock L4 for a critical step first, then select a task.</div>`;
+  } else if(!selTask){
+    html += `<div class="empty-note">Click a task in L4 above to add its work instructions here.</div>`;
+  } else {
+    html += `<div class="subblock-title" style="margin-bottom:10px;">${escapeHtml(selTask.text)}</div>`;
+    if(selTask.work_instructions.length===0) html += `<div class="empty-note">No work instructions yet.</div>`;
+    selTask.work_instructions.forEach(wi=>{
+      html += `<div class="wi-row">
+        <input type="text" placeholder="Transaction" value="${escapeHtml(wi.transaction)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','transaction', this.value)">
+        <input type="text" placeholder="Field" value="${escapeHtml(wi.field)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','field', this.value)">
+        <input type="text" placeholder="Tool" value="${escapeHtml(wi.tool)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','tool', this.value)">
+        <button class="icon-btn" onclick="removeWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}')">✕</button>
+      </div>`;
+    });
+    html += `<button class="link-btn" onclick="addWI('${selSp.id}','${selStep.id}','${selTask.id}')">+ add work instruction</button>`;
+  }
+  html += `</div>`;
 
   document.getElementById('editorLeft').innerHTML = html;
 }
+
 
 function updateEditorTree(){
   const p = state.editorProcess;
