@@ -83,12 +83,11 @@
   .row-input input{ flex:1; }
   .icon-btn{ background:none; border:none; color:var(--red); font-size:15px; cursor:pointer; width:26px; flex-shrink:0; }
   .empty-note{ color:var(--gray-400); font-size:13px; font-style:italic; padding:6px 0; }
-  .sp-tabs{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
-  .sp-tab{ font-size:12.5px; font-weight:600; padding:6px 12px; border-radius:8px; cursor:pointer;
-    border:1px solid var(--gray-200); background:var(--gray-100); color:var(--gray-500); transition:all .12s ease; }
-  .sp-tab:hover:not(.sel){ background:var(--gray-200); color:var(--gray-700); }
-  .sp-tab.sel{ background:var(--gray-700); border-color:var(--gray-700); color:#fff; }
-  .sp-tab:disabled{ opacity:.5; cursor:not-allowed; }
+  .sp-row{ padding:10px 14px; border-radius:8px; margin-bottom:8px; cursor:pointer; font-size:13.5px; font-weight:600;
+    border:1px solid var(--gray-200); background:var(--gray-100); color:var(--gray-500); transition:all .12s ease;
+    display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .sp-row:hover:not(.sel){ background:var(--gray-200); color:var(--gray-700); }
+  .sp-row.sel{ background:var(--gray-700); border-color:var(--gray-700); color:#fff; }
   .subblock{ border-left:3px solid var(--violet-light); padding-left:12px; margin-bottom:14px; }
   .subblock-title{ font-weight:700; font-size:13px; color:var(--navy); margin-bottom:8px; }
   .step-line{ display:flex; align-items:center; gap:8px; padding:7px 0; border-bottom:1px dashed var(--gray-200); }
@@ -367,7 +366,10 @@ function backToDashboard(){
   loadProcessList().then(render);
 }
 function findSp(spId){ return state.editorProcess.subprocesses.find(s=>s.id===spId); }
-function selectSubprocess(spId){ state.editorSelectedSpId = spId; renderEditorLeftPanel(); }
+function toggleSpSelection(spId){
+  state.editorSelectedSpId = (state.editorSelectedSpId === spId) ? null : spId;
+  renderEditorLeftPanel();
+}
 function findStep(spId, stepId){ return findSp(spId).steps.find(s=>s.id===stepId); }
 function findTask(spId, stepId, taskId){ return findStep(spId, stepId).tasks.find(t=>t.id===taskId); }
 function getCriticalSteps(){
@@ -931,15 +933,25 @@ function renderEditorLeftPanel(){
     <div class="card-head"><div class="card-head-left"><span class="badge ${p.l1_locked?'badge-purple':'badge-gray'}">L2</span><span class="card-title">Sub-processes</span></div>
     <span class="card-hint">short noun phrases</span></div>`;
   if(!p.l1_locked){ html += `<div class="empty-note">Lock L1 first to add sub-processes.</div>`; }
-  else {
+  else if(!p.l2_locked){
     if(p.subprocesses.length===0) html += `<div class="empty-note">No sub-processes yet.</div>`;
     p.subprocesses.forEach(sp=>{
       html += `<div class="row-input">
-        <input type="text" placeholder="e.g. Order management" value="${escapeHtml(sp.name)}" ${p.l2_locked?'disabled':''} oninput="onSubName('${sp.id}', this.value)">
-        ${!p.l2_locked ? `<button class="icon-btn" onclick="removeSubprocess('${sp.id}')">✕</button>` : ''}
+        <input type="text" placeholder="e.g. Order management" value="${escapeHtml(sp.name)}" oninput="onSubName('${sp.id}', this.value)">
+        <button class="icon-btn" onclick="removeSubprocess('${sp.id}')">✕</button>
       </div>`;
     });
-    if(!p.l2_locked) html += `<button class="link-btn" onclick="addSubprocess()">+ add sub-process</button>`;
+    html += `<button class="link-btn" onclick="addSubprocess()">+ add sub-process</button>`;
+  } else {
+    html += `<div class="empty-note" style="margin-bottom:8px;">Click a sub-process to work on it in L3 / L4. Click it again to switch to another one.</div>`;
+    p.subprocesses.forEach(sp=>{
+      const isSel = sp.id === state.editorSelectedSpId;
+      const hasSteps = sp.steps.some(s=>s.text.trim());
+      html += `<div class="sp-row ${isSel?'sel':''}" onclick="toggleSpSelection('${sp.id}')">
+        <span>${escapeHtml(sp.name || '(untitled)')}</span>
+        <span style="font-size:11px; font-weight:600; opacity:.85;">${isSel ? 'currently editing' : (hasSteps ? '✓ has steps' : 'click to edit')}</span>
+      </div>`;
+    });
   }
   html += `<button class="lock-btn ${p.l2_locked?'done-btn':''}" ${p.l2_locked ? '' : (!p.l1_locked || !p.subprocesses.some(s=>s.name.trim()) ? 'disabled':'')} onclick="${p.l2_locked?'unlockL2()':'lockL2()'}">${p.l2_locked?'✓ Locked — click to edit':'Lock L2 → go to L3'}</button>
   </div>`;
@@ -951,36 +963,35 @@ function renderEditorLeftPanel(){
   if(!p.l2_locked){ html += `<div class="empty-note">Lock L2 first to add process steps.</div>`; }
   else if(p.subprocesses.length===0){ html += `<div class="empty-note">No sub-processes yet — add one in L2 above.</div>`; }
   else {
-    selSp = p.subprocesses.find(s=>s.id===state.editorSelectedSpId);
-    if(!selSp){ selSp = p.subprocesses[0]; state.editorSelectedSpId = selSp.id; }
-    html += `<div class="sp-tabs">${p.subprocesses.map(sp=>{
-      const done = sp.steps.some(s=>s.text.trim()) ? ' ✓' : '';
-      return `<button class="sp-tab ${sp.id===selSp.id?'sel':''}" onclick="selectSubprocess('${sp.id}')">${escapeHtml(sp.name || '(untitled)')}${done}</button>`;
-    }).join('')}</div>`;
-    html += `<div class="subblock"><div class="subblock-title">${escapeHtml(selSp.name || '(untitled)')}</div>`;
-    if(selSp.steps.length===0 && !p.l3_locked) html += `<div class="empty-note">No steps yet.</div>`;
-    selSp.steps.forEach(st=>{
-      if(!p.l3_locked){
-        html += `<div class="row-input">
-          <input type="text" placeholder="e.g. Create sales order" value="${escapeHtml(st.text)}" oninput="onStepText('${selSp.id}','${st.id}', this.value)">
-          <button class="icon-btn" onclick="removeStep('${selSp.id}','${st.id}')">✕</button>
-        </div>`;
-      } else {
-        html += `<div class="step-line">
-          <div class="step-text">${escapeHtml(st.text)}</div>
-          <div class="cls-btns">
-            <button class="cls-btn critical ${st.classification==='critical'?'sel':''}" onclick="classifyStep('${selSp.id}','${st.id}','critical')">Critical</button>
-            <button class="cls-btn standard ${st.classification==='standard'?'sel':''}" onclick="classifyStep('${selSp.id}','${st.id}','standard')">Standard</button>
-          </div>
-        </div>`;
-      }
-    });
-    if(!p.l3_locked) html += `<button class="link-btn" onclick="addStep('${selSp.id}')">+ add step</button>`;
-    html += `</div>`;
+    selSp = p.subprocesses.find(s=>s.id===state.editorSelectedSpId) || null;
+    if(!selSp){
+      html += `<div class="empty-note">Click a sub-process in L2 above to add its steps here.</div>`;
+    } else {
+      html += `<div class="subblock"><div class="subblock-title">${escapeHtml(selSp.name || '(untitled)')}</div>`;
+      if(selSp.steps.length===0 && !p.l3_locked) html += `<div class="empty-note">No steps yet.</div>`;
+      selSp.steps.forEach(st=>{
+        if(!p.l3_locked){
+          html += `<div class="row-input">
+            <input type="text" placeholder="e.g. Create sales order" value="${escapeHtml(st.text)}" oninput="onStepText('${selSp.id}','${st.id}', this.value)">
+            <button class="icon-btn" onclick="removeStep('${selSp.id}','${st.id}')">✕</button>
+          </div>`;
+        } else {
+          html += `<div class="step-line">
+            <div class="step-text">${escapeHtml(st.text)}</div>
+            <div class="cls-btns">
+              <button class="cls-btn critical ${st.classification==='critical'?'sel':''}" onclick="classifyStep('${selSp.id}','${st.id}','critical')">Critical</button>
+              <button class="cls-btn standard ${st.classification==='standard'?'sel':''}" onclick="classifyStep('${selSp.id}','${st.id}','standard')">Standard</button>
+            </div>
+          </div>`;
+        }
+      });
+      if(!p.l3_locked) html += `<button class="link-btn" onclick="addStep('${selSp.id}')">+ add step</button>`;
+      html += `</div>`;
+    }
   }
   const allHaveSteps = p.l2_locked && p.subprocesses.length>0 && p.subprocesses.every(sp=>sp.steps.some(s=>s.text.trim()));
   html += `<button class="lock-btn ${p.l3_locked?'done-btn':''}" ${p.l3_locked ? '' : (!allHaveSteps ? 'disabled':'')} onclick="${p.l3_locked?'unlockL3()':'lockL3()'}">${p.l3_locked?'✓ Locked — click to edit steps':'Lock L3 → classify critical / standard'}</button>
-  ${p.l2_locked && p.subprocesses.length>0 && !allHaveSteps ? `<div class="empty-note" style="margin-top:6px;">Every sub-process needs at least one step before you can lock L3 — switch tabs above to fill in the rest.</div>` : ''}
+  ${p.l2_locked && p.subprocesses.length>0 && !allHaveSteps ? `<div class="empty-note" style="margin-top:6px;">Still missing steps in: ${p.subprocesses.filter(sp=>!sp.steps.some(s=>s.text.trim())).map(sp=>escapeHtml(sp.name||'(untitled)')).join(', ')} — click them in L2 above to add steps.</div>` : ''}
   </div>`;
 
   html += `<div class="card ${c4}">
@@ -991,14 +1002,11 @@ function renderEditorLeftPanel(){
   else {
     criticalSteps = getCriticalSteps();
     if(criticalSteps.length===0){ html += `<div class="empty-note">No steps classified as critical yet — mark steps critical in L3 above.</div>`; }
-    else if(selSp){
-      html += `<div class="sp-tabs">${p.subprocesses.map(sp=>{
-        const spCritCount = sp.steps.filter(s=>s.classification==='critical').length;
-        if(spCritCount===0) return '';
-        return `<button class="sp-tab ${sp.id===selSp.id?'sel':''}" onclick="selectSubprocess('${sp.id}')">${escapeHtml(sp.name || '(untitled)')} (${spCritCount})</button>`;
-      }).join('')}</div>`;
+    else if(!selSp){
+      html += `<div class="empty-note">Click a sub-process in L2 above to work on its critical tasks here.</div>`;
+    } else {
       const selCriticalSteps = criticalSteps.filter(c=>c.sp.id===selSp.id);
-      if(selCriticalSteps.length===0){ html += `<div class="empty-note">No critical steps in "${escapeHtml(selSp.name)}" — switch to another tab above.</div>`; }
+      if(selCriticalSteps.length===0){ html += `<div class="empty-note">No critical steps in "${escapeHtml(selSp.name)}" — mark some as critical in L3, or click another sub-process in L2.</div>`; }
       selCriticalSteps.forEach(({sp, step})=>{
         html += `<div class="subblock"><div class="subblock-title">${escapeHtml(sp.name)} <span class="tag tag-critical">critical</span><br><span style="font-weight:400; color:var(--gray-500); font-size:12px;">${escapeHtml(step.text)}</span></div>`;
         step.tasks.forEach(task=>{
