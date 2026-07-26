@@ -83,6 +83,12 @@
   .row-input input{ flex:1; }
   .icon-btn{ background:none; border:none; color:var(--red); font-size:15px; cursor:pointer; width:26px; flex-shrink:0; }
   .empty-note{ color:var(--gray-400); font-size:13px; font-style:italic; padding:6px 0; }
+  .sp-tabs{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+  .sp-tab{ font-size:12.5px; font-weight:600; padding:6px 12px; border-radius:8px; cursor:pointer;
+    border:1px solid var(--gray-200); background:var(--gray-100); color:var(--gray-500); transition:all .12s ease; }
+  .sp-tab:hover:not(.sel){ background:var(--gray-200); color:var(--gray-700); }
+  .sp-tab.sel{ background:var(--gray-700); border-color:var(--gray-700); color:#fff; }
+  .sp-tab:disabled{ opacity:.5; cursor:not-allowed; }
   .subblock{ border-left:3px solid var(--violet-light); padding-left:12px; margin-bottom:14px; }
   .subblock-title{ font-weight:700; font-size:13px; color:var(--navy); margin-bottom:8px; }
   .step-line{ display:flex; align-items:center; gap:8px; padding:7px 0; border-bottom:1px dashed var(--gray-200); }
@@ -164,6 +170,7 @@ let state = {
   departments: [],
   processList: [],
   editorProcess: null,
+  editorSelectedSpId: null,
   adminTab: 'pending',
   adminPending: [],
   adminUsers: [],
@@ -250,6 +257,7 @@ async function doSignIn(email, password){
 async function doSignOut(){
   await sb.auth.signOut();
   state = { screen:'login', user:null, profile:null, departments:[], processList:[], editorProcess:null,
+    editorSelectedSpId:null,
     adminTab:'pending', adminPending:[], adminUsers:[], authError:'', showNewProcessModal:false,
     showNewDeptInline:false, lastCreatedDeptId:null, dashboardSearch:'', dashboardSort:'newest' };
   render();
@@ -350,6 +358,7 @@ async function openEditor(processId){
     });
   });
   state.editorProcess = sortTree(data);
+  state.editorSelectedSpId = null;
   state.screen = 'editor';
   render();
 }
@@ -358,6 +367,7 @@ function backToDashboard(){
   loadProcessList().then(render);
 }
 function findSp(spId){ return state.editorProcess.subprocesses.find(s=>s.id===spId); }
+function selectSubprocess(spId){ state.editorSelectedSpId = spId; renderEditorLeftPanel(); }
 function findStep(spId, stepId){ return findSp(spId).steps.find(s=>s.id===stepId); }
 function findTask(spId, stepId, taskId){ return findStep(spId, stepId).tasks.find(t=>t.id===taskId); }
 function getCriticalSteps(){
@@ -937,33 +947,40 @@ function renderEditorLeftPanel(){
   html += `<div class="card ${c3}">
     <div class="card-head"><div class="card-head-left"><span class="badge ${p.l2_locked?'badge-navy':'badge-gray'}">L3</span><span class="card-title">Process steps</span></div>
     <span class="card-hint">verb first: "create...", "check..."</span></div>`;
+  let selSp = null;
   if(!p.l2_locked){ html += `<div class="empty-note">Lock L2 first to add process steps.</div>`; }
+  else if(p.subprocesses.length===0){ html += `<div class="empty-note">No sub-processes yet — add one in L2 above.</div>`; }
   else {
-    p.subprocesses.forEach(sp=>{
-      html += `<div class="subblock"><div class="subblock-title">${escapeHtml(sp.name)}</div>`;
-      if(sp.steps.length===0 && !p.l3_locked) html += `<div class="empty-note">No steps yet.</div>`;
-      sp.steps.forEach(st=>{
-        if(!p.l3_locked){
-          html += `<div class="row-input">
-            <input type="text" placeholder="e.g. Create sales order" value="${escapeHtml(st.text)}" oninput="onStepText('${sp.id}','${st.id}', this.value)">
-            <button class="icon-btn" onclick="removeStep('${sp.id}','${st.id}')">✕</button>
-          </div>`;
-        } else {
-          html += `<div class="step-line">
-            <div class="step-text">${escapeHtml(st.text)}</div>
-            <div class="cls-btns">
-              <button class="cls-btn critical ${st.classification==='critical'?'sel':''}" onclick="classifyStep('${sp.id}','${st.id}','critical')">Critical</button>
-              <button class="cls-btn standard ${st.classification==='standard'?'sel':''}" onclick="classifyStep('${sp.id}','${st.id}','standard')">Standard</button>
-            </div>
-          </div>`;
-        }
-      });
-      if(!p.l3_locked) html += `<button class="link-btn" onclick="addStep('${sp.id}')">+ add step</button>`;
-      html += `</div>`;
+    selSp = p.subprocesses.find(s=>s.id===state.editorSelectedSpId);
+    if(!selSp){ selSp = p.subprocesses[0]; state.editorSelectedSpId = selSp.id; }
+    html += `<div class="sp-tabs">${p.subprocesses.map(sp=>{
+      const done = sp.steps.some(s=>s.text.trim()) ? ' ✓' : '';
+      return `<button class="sp-tab ${sp.id===selSp.id?'sel':''}" onclick="selectSubprocess('${sp.id}')">${escapeHtml(sp.name || '(untitled)')}${done}</button>`;
+    }).join('')}</div>`;
+    html += `<div class="subblock"><div class="subblock-title">${escapeHtml(selSp.name || '(untitled)')}</div>`;
+    if(selSp.steps.length===0 && !p.l3_locked) html += `<div class="empty-note">No steps yet.</div>`;
+    selSp.steps.forEach(st=>{
+      if(!p.l3_locked){
+        html += `<div class="row-input">
+          <input type="text" placeholder="e.g. Create sales order" value="${escapeHtml(st.text)}" oninput="onStepText('${selSp.id}','${st.id}', this.value)">
+          <button class="icon-btn" onclick="removeStep('${selSp.id}','${st.id}')">✕</button>
+        </div>`;
+      } else {
+        html += `<div class="step-line">
+          <div class="step-text">${escapeHtml(st.text)}</div>
+          <div class="cls-btns">
+            <button class="cls-btn critical ${st.classification==='critical'?'sel':''}" onclick="classifyStep('${selSp.id}','${st.id}','critical')">Critical</button>
+            <button class="cls-btn standard ${st.classification==='standard'?'sel':''}" onclick="classifyStep('${selSp.id}','${st.id}','standard')">Standard</button>
+          </div>
+        </div>`;
+      }
     });
+    if(!p.l3_locked) html += `<button class="link-btn" onclick="addStep('${selSp.id}')">+ add step</button>`;
+    html += `</div>`;
   }
   const allHaveSteps = p.l2_locked && p.subprocesses.length>0 && p.subprocesses.every(sp=>sp.steps.some(s=>s.text.trim()));
   html += `<button class="lock-btn ${p.l3_locked?'done-btn':''}" ${p.l3_locked ? '' : (!allHaveSteps ? 'disabled':'')} onclick="${p.l3_locked?'unlockL3()':'lockL3()'}">${p.l3_locked?'✓ Locked — click to edit steps':'Lock L3 → classify critical / standard'}</button>
+  ${p.l2_locked && p.subprocesses.length>0 && !allHaveSteps ? `<div class="empty-note" style="margin-top:6px;">Every sub-process needs at least one step before you can lock L3 — switch tabs above to fill in the rest.</div>` : ''}
   </div>`;
 
   html += `<div class="card ${c4}">
@@ -973,30 +990,39 @@ function renderEditorLeftPanel(){
   if(!p.l3_locked){ html += `<div class="empty-note">Lock L3 first, then classify each step.</div>`; }
   else {
     criticalSteps = getCriticalSteps();
-    if(criticalSteps.length===0) html += `<div class="empty-note">No steps classified as critical yet — mark steps critical in L3 above.</div>`;
-    criticalSteps.forEach(({sp, step})=>{
-      html += `<div class="subblock"><div class="subblock-title">${escapeHtml(sp.name)} <span class="tag tag-critical">critical</span><br><span style="font-weight:400; color:var(--gray-500); font-size:12px;">${escapeHtml(step.text)}</span></div>`;
-      step.tasks.forEach(task=>{
-        html += `<div class="task-block">
-          <div class="row-input">
-            <input type="text" placeholder="e.g. Enter customer ID" value="${escapeHtml(task.text)}" ${p.l4_locked?'disabled':''} oninput="onTaskText('${sp.id}','${step.id}','${task.id}', this.value)">
-            ${!p.l4_locked ? `<button class="icon-btn" onclick="removeTask('${sp.id}','${step.id}','${task.id}')">✕</button>` : ''}
-          </div>
-          <div class="task-block-header">L5 work instructions <span style="opacity:.6;">(transaction · field · tool)</span></div>`;
-        task.work_instructions.forEach(wi=>{
-          html += `<div class="wi-row">
-            <input type="text" placeholder="Transaction" value="${escapeHtml(wi.transaction)}" ${p.l4_locked?'disabled':''} oninput="onWI('${sp.id}','${step.id}','${task.id}','${wi.id}','transaction', this.value)">
-            <input type="text" placeholder="Field" value="${escapeHtml(wi.field)}" ${p.l4_locked?'disabled':''} oninput="onWI('${sp.id}','${step.id}','${task.id}','${wi.id}','field', this.value)">
-            <input type="text" placeholder="Tool" value="${escapeHtml(wi.tool)}" ${p.l4_locked?'disabled':''} oninput="onWI('${sp.id}','${step.id}','${task.id}','${wi.id}','tool', this.value)">
-            ${!p.l4_locked ? `<button class="icon-btn" onclick="removeWI('${sp.id}','${step.id}','${task.id}','${wi.id}')">✕</button>` : `<span></span>`}
-          </div>`;
+    if(criticalSteps.length===0){ html += `<div class="empty-note">No steps classified as critical yet — mark steps critical in L3 above.</div>`; }
+    else if(selSp){
+      html += `<div class="sp-tabs">${p.subprocesses.map(sp=>{
+        const spCritCount = sp.steps.filter(s=>s.classification==='critical').length;
+        if(spCritCount===0) return '';
+        return `<button class="sp-tab ${sp.id===selSp.id?'sel':''}" onclick="selectSubprocess('${sp.id}')">${escapeHtml(sp.name || '(untitled)')} (${spCritCount})</button>`;
+      }).join('')}</div>`;
+      const selCriticalSteps = criticalSteps.filter(c=>c.sp.id===selSp.id);
+      if(selCriticalSteps.length===0){ html += `<div class="empty-note">No critical steps in "${escapeHtml(selSp.name)}" — switch to another tab above.</div>`; }
+      selCriticalSteps.forEach(({sp, step})=>{
+        html += `<div class="subblock"><div class="subblock-title">${escapeHtml(sp.name)} <span class="tag tag-critical">critical</span><br><span style="font-weight:400; color:var(--gray-500); font-size:12px;">${escapeHtml(step.text)}</span></div>`;
+        step.tasks.forEach(task=>{
+          html += `<div class="task-block">
+            <div class="row-input">
+              <input type="text" placeholder="e.g. Enter customer ID" value="${escapeHtml(task.text)}" ${p.l4_locked?'disabled':''} oninput="onTaskText('${sp.id}','${step.id}','${task.id}', this.value)">
+              ${!p.l4_locked ? `<button class="icon-btn" onclick="removeTask('${sp.id}','${step.id}','${task.id}')">✕</button>` : ''}
+            </div>
+            <div class="task-block-header">L5 work instructions <span style="opacity:.6;">(transaction · field · tool)</span></div>`;
+          task.work_instructions.forEach(wi=>{
+            html += `<div class="wi-row">
+              <input type="text" placeholder="Transaction" value="${escapeHtml(wi.transaction)}" ${p.l4_locked?'disabled':''} oninput="onWI('${sp.id}','${step.id}','${task.id}','${wi.id}','transaction', this.value)">
+              <input type="text" placeholder="Field" value="${escapeHtml(wi.field)}" ${p.l4_locked?'disabled':''} oninput="onWI('${sp.id}','${step.id}','${task.id}','${wi.id}','field', this.value)">
+              <input type="text" placeholder="Tool" value="${escapeHtml(wi.tool)}" ${p.l4_locked?'disabled':''} oninput="onWI('${sp.id}','${step.id}','${task.id}','${wi.id}','tool', this.value)">
+              ${!p.l4_locked ? `<button class="icon-btn" onclick="removeWI('${sp.id}','${step.id}','${task.id}','${wi.id}')">✕</button>` : `<span></span>`}
+            </div>`;
+          });
+          if(!p.l4_locked) html += `<button class="link-btn" onclick="addWI('${sp.id}','${step.id}','${task.id}')">+ add work instruction</button>`;
+          html += `</div>`;
         });
-        if(!p.l4_locked) html += `<button class="link-btn" onclick="addWI('${sp.id}','${step.id}','${task.id}')">+ add work instruction</button>`;
+        if(!p.l4_locked) html += `<button class="link-btn" onclick="addTask('${sp.id}','${step.id}')">+ add task</button>`;
         html += `</div>`;
       });
-      if(!p.l4_locked) html += `<button class="link-btn" onclick="addTask('${sp.id}','${step.id}')">+ add task</button>`;
-      html += `</div>`;
-    });
+    }
   }
   const allHaveTasks = p.l3_locked && (criticalSteps.length===0 || criticalSteps.every(c=>c.step.tasks.some(t=>t.text.trim())));
   html += `<button class="lock-btn ${p.l4_locked?'done-btn':''}" ${p.l4_locked ? '' : (!allHaveTasks?'disabled':'')} onclick="${p.l4_locked?'unlockL4()':'lockL4()'}">${p.l4_locked?'✓ Locked — click to edit':'Lock L4 → go to L5'}</button>
