@@ -186,6 +186,28 @@ let state = {
 function escapeHtml(s){
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+
+/* ================= VISIBLE ERROR BANNER (temporary debug aid) ================= */
+window.addEventListener('error', function(e){
+  showErrorBanner('JS ERROR: ' + e.message + ' — ' + (e.filename||'') + ':' + e.lineno + ':' + e.colno + '\n' + (e.error && e.error.stack ? e.error.stack : ''));
+});
+window.addEventListener('unhandledrejection', function(e){
+  showErrorBanner('PROMISE ERROR: ' + (e.reason && e.reason.message ? e.reason.message : e.reason) + '\n' + (e.reason && e.reason.stack ? e.reason.stack : ''));
+});
+function showErrorBanner(text){
+  let banner = document.getElementById('debug-error-banner');
+  if(!banner){
+    banner = document.createElement('div');
+    banner.id = 'debug-error-banner';
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:14px 20px;font-family:ui-monospace,Menlo,monospace;font-size:12px;z-index:99999;white-space:pre-wrap;max-height:40vh;overflow:auto;box-shadow:0 4px 12px rgba(0,0,0,.3);';
+    document.body.appendChild(banner);
+  }
+  const entry = document.createElement('div');
+  entry.style.cssText = 'border-top:1px solid rgba(255,255,255,.3); padding-top:8px; margin-top:8px;';
+  entry.textContent = new Date().toLocaleTimeString() + '  ' + text;
+  banner.appendChild(entry);
+}
+
 function toast(msg){
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
@@ -361,7 +383,7 @@ async function openEditor(processId){
     });
   });
   state.editorProcess = sortTree(data);
-  state.editorSelectedSpId = null;
+  state.editorSelectedSpId = (data.l2_locked && data.subprocesses.length>0) ? data.subprocesses[0].id : null;
   state.editorSelectedStepId = null;
   state.editorSelectedTaskId = null;
   state.screen = 'editor';
@@ -445,7 +467,11 @@ async function removeSubprocess(spId){
 async function lockL2(){
   if(!state.editorProcess.subprocesses.some(s=>s.name.trim())) return;
   await sb.from('processes').update({ l2_locked:true }).eq('id', state.editorProcess.id);
-  state.editorProcess.l2_locked = true; renderEditor();
+  state.editorProcess.l2_locked = true;
+  if(!state.editorSelectedSpId && state.editorProcess.subprocesses.length>0){
+    state.editorSelectedSpId = state.editorProcess.subprocesses[0].id;
+  }
+  renderEditor();
 }
 async function unlockL2(){
   await sb.from('processes').update({ l2_locked:false }).eq('id', state.editorProcess.id);
@@ -472,7 +498,11 @@ async function lockL3ForSp(spId){
   if(!sp.steps.some(s=>s.text.trim())) return;
   const { error } = await sb.from('subprocesses').update({ l3_locked:true }).eq('id', spId);
   if(error){ toast(error.message); return; }
-  sp.l3_locked = true; renderEditor();
+  sp.l3_locked = true;
+  if(!state.editorSelectedStepId && sp.steps.length>0){
+    state.editorSelectedStepId = sp.steps[0].id;
+  }
+  renderEditor();
 }
 async function unlockL3ForSp(spId){
   await sb.from('subprocesses').update({ l3_locked:false }).eq('id', spId);
@@ -519,7 +549,11 @@ async function lockL4ForStep(spId, stepId){
   if(!step.tasks.some(t=>t.text.trim())) return;
   const { error } = await sb.from('steps').update({ l4_locked:true }).eq('id', stepId);
   if(error){ toast(error.message); return; }
-  step.l4_locked = true; renderEditor();
+  step.l4_locked = true;
+  if(!state.editorSelectedTaskId && step.tasks.length>0){
+    state.editorSelectedTaskId = step.tasks[0].id;
+  }
+  renderEditor();
 }
 async function unlockL4ForStep(spId, stepId){
   await sb.from('steps').update({ l4_locked:false }).eq('id', stepId);
