@@ -779,11 +779,12 @@ function toggleDraftCompany(rowId, companyId){
   state.adminDraftCompanies[rowId] = cur;
   render();
 }
-async function syncProfileCompanies(profileId, companyIds){
+async function syncProfileCompanies(profileId, companyIds, role){
+  const level = (role === 'process_owner' || role === 'admin') ? 'edit' : 'view';
   const { error: delError } = await sb.from('profile_companies').delete().eq('profile_id', profileId);
   if(delError){ toast(delError.message); return false; }
   if(companyIds.length === 0) return true;
-  const rows = companyIds.map(cid => ({ profile_id: profileId, company_id: cid }));
+  const rows = companyIds.map(cid => ({ profile_id: profileId, company_id: cid, level }));
   const { error: insError } = await sb.from('profile_companies').insert(rows);
   if(insError){ toast(insError.message); return false; }
   return true;
@@ -792,7 +793,7 @@ async function approveUser(id){
   const role = document.getElementById('role-'+id).value;
   const { error } = await sb.from('profiles').update({ role, status:'approved' }).eq('id', id);
   if(error){ toast(error.message); return; }
-  await syncProfileCompanies(id, state.adminDraftCompanies[id] || []);
+  await syncProfileCompanies(id, state.adminDraftCompanies[id] || [], role);
   toast('User approved.');
   await loadAdminData(); render();
 }
@@ -807,7 +808,7 @@ async function updateUser(id){
   const status = document.getElementById('ustatus-'+id).value;
   const { error } = await sb.from('profiles').update({ role, status }).eq('id', id);
   if(error){ toast(error.message); return; }
-  await syncProfileCompanies(id, state.adminDraftCompanies[id] || []);
+  await syncProfileCompanies(id, state.adminDraftCompanies[id] || [], role);
   toast('Saved.');
   await loadAdminData(); render();
 }
