@@ -5,24 +5,29 @@
 <title>Velogy — Process Capture</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --violet: #7c3aed; --violet-dark: #6d28d9; --violet-light: #ede9fe;
-    --navy: #312e81; --green: #16a34a; --green-bg: #f0fdf4; --green-border: #bbf7d0;
-    --gray-50: #f7f7f9; --gray-100: #f1f1f4; --gray-200: #e5e5ea; --gray-400: #9ca3af;
-    --gray-500: #6b7280; --gray-700: #374151; --gray-900: #111827; --red: #dc2626; --red-bg:#fef2f2;
+    --violet: #4F3CC9; --violet-dark: #3B2C9E; --violet-light: #EDEAFB;
+    --navy: #241B54; --green: #1E7A3B; --green-bg: #EAF7EE; --green-border: #CDEBD7;
+    --gray-50: #F7F6FB; --gray-100: #F3F2F8; --gray-200: #E7E4EF; --gray-400: #C7C3D6;
+    --gray-500: #8B87A0; --gray-700: #6B6680; --gray-800: #332E4D; --gray-900: #161326; --red: #dc2626; --red-bg:#fef2f2;
+    --mono: 'IBM Plex Mono', Menlo, monospace;
   }
   *{box-sizing:border-box;}
-  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
-    background:var(--gray-50); color:var(--gray-900); padding:20px; }
+  body{ margin:0; font-family:'Manrope',-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--gray-100); color:var(--gray-900); padding:20px; }
   .wrap{ max-width:1400px; margin:0 auto; }
   .header{ background:#fff; border:1px solid var(--gray-200); border-radius:14px; padding:18px 24px;
     display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:12px; }
-  .brand{ display:flex; align-items:center; gap:12px; }
-  .logo{ width:34px; height:34px; border-radius:8px; background:linear-gradient(135deg,var(--violet),var(--violet-dark));
-    display:flex; align-items:center; justify-content:center; color:#fff; font-size:16px; flex-shrink:0; }
-  .brand h1{ margin:0; font-size:19px; font-weight:700; }
-  .brand p{ margin:2px 0 0; font-size:12.5px; color:var(--gray-500); }
+  .brand{ display:flex; align-items:center; gap:14px; }
+  .logo{ width:42px; height:42px; border-radius:12px; background:linear-gradient(135deg,#5B45DB,#2E2170);
+    box-shadow:0 4px 10px rgba(46,33,112,.25);
+    display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px; font-weight:800;
+    font-family:var(--mono); flex-shrink:0; }
+  .brand h1{ margin:0; font-size:17px; font-weight:800; color:var(--gray-900); letter-spacing:-.01em; }
+  .brand p{ margin:1px 0 0; font-size:12.5px; color:var(--gray-500); }
   .actions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   .btn{ border-radius:8px; padding:9px 14px; font-size:13.5px; font-weight:600; cursor:pointer;
     border:1px solid transparent; transition:all .12s ease; white-space:nowrap; }
@@ -31,9 +36,11 @@
   .btn-ghost:hover:not(:disabled){ background:var(--gray-100); }
   .btn-primary{ background:var(--violet); color:#fff; }
   .btn-primary:hover:not(:disabled){ background:var(--violet-dark); }
+  .btn-dark{ background:var(--navy); border-color:var(--navy); color:#fff; }
+  .btn-dark:hover:not(:disabled){ background:#1a1240; }
   .btn-danger{ background:#fff; border-color:var(--red); color:var(--red); }
   .btn-danger:hover:not(:disabled){ background:var(--red-bg); }
-  .pill{ font-size:11.5px; font-weight:700; padding:3px 9px; border-radius:999px; }
+  .pill{ font-family:var(--mono); font-size:12px; font-weight:700; padding:5px 11px; border-radius:999px; text-transform:uppercase; letter-spacing:.02em; }
   .pill-admin{ background:var(--violet-light); color:var(--violet-dark); }
   .pill-owner{ background:#dbeafe; color:#1e40af; }
   .pill-viewer{ background:var(--gray-100); color:var(--gray-700); }
@@ -63,18 +70,19 @@
 
   .grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
   @media (max-width:980px){ .grid{ grid-template-columns:1fr; } }
-  .card{ background:#fff; border:1px solid var(--gray-200); border-radius:14px; padding:18px 20px;
-    margin-bottom:14px; transition:border-color .15s ease,background .15s ease; }
+  .card{ background:#fff; border:1px solid var(--gray-200); border-radius:18px; padding:24px;
+    margin-bottom:14px; transition:border-color .15s ease,background .15s ease; box-shadow:0 1px 2px rgba(20,15,50,.03); }
   .card.active{ border-color:var(--violet); box-shadow:0 0 0 3px var(--violet-light); }
   .card.done{ border-color:var(--gray-200); }
   .card.disabled{ opacity:.55; }
-  .card-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:10px; }
+  .card-head{ display:flex; flex-direction:column; align-items:flex-start; gap:4px; margin-bottom:12px; }
   .card-head-left{ display:flex; align-items:center; gap:10px; }
-  .badge{ font-size:11.5px; font-weight:700; color:#fff; padding:3px 8px; border-radius:6px; }
+  .badge{ font-family:var(--mono); font-size:12.5px; font-weight:700; color:#fff; padding:4px 9px; border-radius:8px; }
   .badge-purple{ background:var(--violet); } .badge-navy{ background:var(--navy); }
   .badge-gray{ background:var(--gray-400); } .badge-green{ background:var(--green); }
-  .card-title{ font-weight:700; font-size:14.5px; }
-  .card-hint{ font-size:12px; color:var(--gray-500); font-style:italic; }
+  .card-title{ font-weight:800; font-size:17.5px; }
+  .card-hint{ font-size:12.5px; color:var(--gray-500); font-style:italic; }
+  .card-desc{ font-size:13px; color:var(--gray-500); margin-bottom:16px; }
   .lock-btn{ width:100%; margin-top:10px; padding:10px; border:none; border-radius:8px; background:var(--violet);
     color:#fff; font-weight:700; font-size:13.5px; cursor:pointer; }
   .lock-btn:disabled{ background:var(--violet-light); color:var(--violet); cursor:not-allowed; }
@@ -86,11 +94,17 @@
   .row-input input{ flex:1; }
   .icon-btn{ background:none; border:none; color:var(--red); font-size:15px; cursor:pointer; width:26px; flex-shrink:0; }
   .empty-note{ color:var(--gray-400); font-size:13px; font-style:italic; padding:6px 0; }
-  .sp-row{ padding:10px 14px; border-radius:8px; margin-bottom:8px; cursor:pointer; font-size:13.5px; font-weight:600;
-    border:1px solid var(--gray-200); background:var(--gray-100); color:var(--gray-500); transition:all .12s ease;
+  .sp-row{ padding:12px 14px; border-radius:10px; margin-bottom:8px; cursor:pointer; font-size:14.5px; font-weight:700;
+    border:1px solid var(--gray-200); background:#fff; color:var(--gray-800); transition:all .12s ease;
     display:flex; justify-content:space-between; align-items:center; gap:10px; }
-  .sp-row:hover:not(.sel){ background:var(--gray-200); color:var(--gray-700); }
-  .sp-row.sel{ background:var(--gray-700); border-color:var(--gray-700); color:#fff; }
+  .sp-row:hover:not(.sel){ background:var(--gray-50); }
+  .sp-row.sel{ background:var(--navy); border-color:var(--navy); color:#fff; }
+  .row-pill{ font-size:12px; font-weight:600; padding:3px 10px; border-radius:999px; white-space:nowrap; }
+  .row-pill.active{ background:rgba(255,255,255,.18); color:#fff; }
+  .row-pill.complete{ background:var(--green-bg); color:var(--green); }
+  .row-pill.todo{ background:none; color:var(--gray-500); font-weight:500; padding:3px 0; }
+  .row-chevron{ font-size:16px; color:var(--gray-400); flex-shrink:0; }
+  .sp-row.sel .row-chevron{ color:rgba(255,255,255,.6); }
   .company-process-row{ background:#fff; }
   .sp-row.company-process-row:hover{ background:var(--violet-light); }
   .subblock{ border-left:3px solid var(--violet-light); padding-left:12px; margin-bottom:14px; }
@@ -102,10 +116,15 @@
   .task-block-header{ font-size:12px; color:var(--gray-500); margin-bottom:6px; }
   .wi-row{ display:grid; grid-template-columns:1fr 1fr 1fr 26px; gap:6px; margin-top:6px; }
   .wi-row input{ font-size:12.5px; padding:6px 8px; }
+  .wi-view{ margin-bottom:12px; }
+  .wi-view-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+  .wi-view-label{ font-size:11.5px; color:var(--gray-500); margin-bottom:5px; font-weight:600; }
+  .wi-view-value{ background:var(--gray-50); border:1px solid var(--gray-200); border-radius:9px; padding:10px 12px;
+    font-family:var(--mono); font-size:13.5px; color:var(--gray-800); word-break:break-word; }
   .stats{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin:14px 0 18px; }
-  .stat{ background:var(--gray-100); border-radius:10px; padding:12px 6px; text-align:center; }
-  .stat .l{ font-size:11.5px; color:var(--gray-500); font-weight:600; }
-  .stat .n{ font-size:22px; font-weight:800; margin-top:2px; }
+  .stat{ background:var(--gray-50); border-radius:12px; padding:10px 6px; text-align:center; }
+  .stat .l{ font-family:var(--mono); font-size:11.5px; color:var(--violet); font-weight:700; }
+  .stat .n{ font-family:var(--mono); font-size:24px; font-weight:700; color:var(--gray-900); margin-top:2px; }
   .tree-process{ margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid var(--gray-200); }
   .tree-process:last-child{ border-bottom:none; }
   .tree-l1{ font-weight:700; color:var(--gray-900); font-size:16px; margin-bottom:6px; }
@@ -764,7 +783,7 @@ function renderHeader(activeLabel){
   const roleClass = state.profile.role==='admin' ? 'pill-admin' : (state.profile.role==='process_owner' ? 'pill-owner' : 'pill-viewer');
   return `<div class="header">
     <div class="brand" style="cursor:pointer;" onclick="backToCompanies()" title="Back to companies">
-      <div class="logo">▶</div>
+      <div class="logo">V</div>
       <div><h1>Velogy — Process Capture</h1><p>Phase 1 tool for Process Owners</p></div>
     </div>
     <div class="actions">
@@ -1016,9 +1035,9 @@ function renderEditor(){
   app.innerHTML = `<div class="wrap">
     ${renderHeader()}
     <div class="header" style="padding:14px 24px; flex-wrap:wrap;">
-      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-        <div style="font-weight:700; font-size:15px;">${escapeHtml(companyName)} — ${escapeHtml(p.l1_name || '')}</div>
-        <button class="btn btn-ghost" style="padding:5px 9px; font-size:12px;" onclick="toggleMegaCycleSwitcher()" title="Switch mega-cycle">✎</button>
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">${escapeHtml(companyName)} — ${escapeHtml(p.l1_name || '')}</div>
+        <button style="width:32px; height:32px; border-radius:8px; border:1px solid var(--gray-200); background:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--gray-700); flex-shrink:0;" onclick="toggleMegaCycleSwitcher()" title="Switch mega-cycle">✎</button>
         ${state.editingMegaCycle ? `
           <select onchange="switchMegaCycle(this.value)" style="width:auto; max-width:260px;">
             <option value="">— switch to —</option>
@@ -1027,13 +1046,13 @@ function renderEditor(){
       </div>
       <div class="actions">
         <button class="btn btn-ghost" onclick="backToCompanies()">← Back</button>
-        <button class="btn btn-ghost" onclick="exportExcel(state.editorProcess.id)">⭳ Export</button>
+        <button class="btn btn-dark" onclick="exportExcel(state.editorProcess.id)">⭳ Export</button>
       </div>
     </div>
     <div class="grid">
       <div id="editorLeft"></div>
       <div class="card" style="position:sticky; top:20px;">
-        <div class="card-title" style="font-size:16px; margin-bottom:2px;">Process tree</div>
+        <div class="card-title" style="font-size:17.5px; margin-bottom:2px;">Process tree</div>
         <div class="card-hint" style="margin-bottom:0;">Live preview</div>
         <div class="stats" id="stats"></div>
         <div id="treeBody"></div>
@@ -1048,6 +1067,15 @@ function renderSavedRow(unlockCall){
   return `<div style="display:flex; align-items:center; gap:8px; margin-top:10px;">
     <div class="saved-indicator">✓ Saved</div>
     <button class="btn btn-ghost" onclick="${unlockCall}">Edit</button>
+  </div>`;
+}
+
+function rowStatusHtml(isSel, hasChildren){
+  const pillClass = isSel ? 'active' : (hasChildren ? 'complete' : 'todo');
+  const label = isSel ? 'Currently editing' : (hasChildren ? '✓ Complete' : 'Click to edit');
+  return `<div style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
+    <span class="row-pill ${pillClass}">${label}</span>
+    <span class="row-chevron">›</span>
   </div>`;
 }
 
@@ -1077,13 +1105,13 @@ function renderEditorLeftPanel(){
     });
     html += `<button class="link-btn" onclick="addSubprocess()">+ add sub-process</button>`;
   } else {
-    html += `<div class="empty-note" style="margin-bottom:8px; opacity:.5;">Click a sub-process to work on it in L3. Click it again to switch to another one.</div>`;
+    html += `<div class="card-desc" style="opacity:.5;">Click a sub-process to work on it in L3. Click it again to switch to another one.</div>`;
     p.subprocesses.forEach(sp=>{
       const isSel = sp.id === state.editorSelectedSpId;
       const hasSteps = sp.steps.some(s=>s.text.trim());
       html += `<div class="sp-row ${isSel?'sel':''}" onclick="toggleSpSelection('${sp.id}')">
         <span>${escapeHtml(sp.name || '(untitled)')}</span>
-        <span style="font-size:11px; font-weight:600; opacity:.85;">${isSel ? 'currently editing' : (hasSteps ? '✓ has steps' : 'click to edit')}</span>
+        ${rowStatusHtml(isSel, hasSteps)}
       </div>`;
     });
   }
@@ -1113,14 +1141,13 @@ function renderEditorLeftPanel(){
       const hasAnyStep = selSp.steps.some(s=>s.text.trim());
       html += `<button id="l3-save-btn" class="lock-btn" ${!hasAnyStep ? 'disabled':''} onclick="lockL3ForSp('${selSp.id}')">Save L3 → select a step</button>`;
     } else {
-      html += `<div class="empty-note" style="margin-bottom:8px; opacity:.5;">Click a step to work on its tasks in L4.</div>`;
+      html += `<div class="card-desc" style="opacity:.5;">Click a step to work on its tasks in L4.</div>`;
       selSp.steps.forEach(st=>{
         const isSel = st.id === state.editorSelectedStepId;
         const hasTasks = st.tasks.some(t=>t.text.trim());
-        const badge = isSel ? 'currently editing' : (hasTasks ? '✓ has tasks' : 'click to edit');
         html += `<div class="sp-row ${isSel?'sel':''}" onclick="toggleStepSelection('${st.id}')">
           <span>${escapeHtml(st.text)}</span>
-          <span style="font-size:11px; font-weight:600; opacity:.85; white-space:nowrap;">${badge}</span>
+          ${rowStatusHtml(isSel, hasTasks)}
         </div>`;
       });
       html += renderSavedRow(`unlockL3ForSp('${selSp.id}')`);
@@ -1148,13 +1175,13 @@ function renderEditorLeftPanel(){
       const hasAnyTask = selStep.tasks.some(t=>t.text.trim());
       html += `<button id="l4-save-btn" class="lock-btn" ${!hasAnyTask ? 'disabled':''} onclick="lockL4ForStep('${selSp.id}','${selStep.id}')">Save L4 → select a task for L5</button>`;
     } else {
-      html += `<div class="empty-note" style="margin-bottom:8px; opacity:.5;">Click a task to work on its work instructions in L5.</div>`;
+      html += `<div class="card-desc" style="opacity:.5;">Click a task to work on its work instructions in L5.</div>`;
       selStep.tasks.forEach(task=>{
         const isSel = task.id === state.editorSelectedTaskId;
         const hasWI = task.work_instructions.some(wi=>wi.transaction.trim()||wi.field.trim()||wi.tool.trim());
         html += `<div class="sp-row ${isSel?'sel':''}" onclick="toggleTaskSelection('${task.id}')">
           <span>${escapeHtml(task.text)}</span>
-          <span style="font-size:11px; font-weight:600; opacity:.85;">${isSel ? 'currently editing' : (hasWI ? '✓ has instructions' : 'needs instructions')}</span>
+          ${rowStatusHtml(isSel, hasWI)}
         </div>`;
       });
       html += renderSavedRow(`unlockL4ForStep('${selSp.id}','${selStep.id}')`);
@@ -1173,19 +1200,28 @@ function renderEditorLeftPanel(){
   } else {
     html += `<div class="subblock-title" style="margin-bottom:10px;">${escapeHtml(selTask.text)}</div>`;
     if(selTask.work_instructions.length===0) html += `<div class="empty-note">No work instructions yet.</div>`;
-    selTask.work_instructions.forEach(wi=>{
-      html += `<div class="wi-row">
-        <input type="text" placeholder="Transaction" value="${escapeHtml(wi.transaction)}" ${selTask.l5_locked?'disabled':''} oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','transaction', this.value)">
-        <input type="text" placeholder="Field" value="${escapeHtml(wi.field)}" ${selTask.l5_locked?'disabled':''} oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','field', this.value)">
-        <input type="text" placeholder="Tool" value="${escapeHtml(wi.tool)}" ${selTask.l5_locked?'disabled':''} oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','tool', this.value)">
-        ${selTask.l5_locked ? '<span></span>' : `<button class="icon-btn" onclick="removeWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}')">✕</button>`}
-      </div>`;
-    });
     if(!selTask.l5_locked){
+      selTask.work_instructions.forEach(wi=>{
+        html += `<div class="wi-row">
+          <input type="text" placeholder="Transaction" value="${escapeHtml(wi.transaction)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','transaction', this.value)">
+          <input type="text" placeholder="Field" value="${escapeHtml(wi.field)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','field', this.value)">
+          <input type="text" placeholder="Tool" value="${escapeHtml(wi.tool)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','tool', this.value)">
+          <button class="icon-btn" onclick="removeWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}')">✕</button>
+        </div>`;
+      });
       html += `<button class="link-btn" onclick="addWI('${selSp.id}','${selStep.id}','${selTask.id}')">+ add work instruction</button>`;
       const hasAnyWI = selTask.work_instructions.some(wi=>wi.transaction.trim()||wi.field.trim()||wi.tool.trim());
       html += `<button id="l5-save-btn" class="lock-btn" ${!hasAnyWI ? 'disabled':''} onclick="lockL5ForTask('${selSp.id}','${selStep.id}','${selTask.id}')">Save L5</button>`;
     } else {
+      selTask.work_instructions.forEach(wi=>{
+        html += `<div class="wi-view">
+          <div class="wi-view-grid">
+            <div><div class="wi-view-label">TRANSACTION</div><div class="wi-view-value">${escapeHtml(wi.transaction) || '—'}</div></div>
+            <div><div class="wi-view-label">FIELD</div><div class="wi-view-value">${escapeHtml(wi.field) || '—'}</div></div>
+            <div><div class="wi-view-label">TOOL</div><div class="wi-view-value">${escapeHtml(wi.tool) || '—'}</div></div>
+          </div>
+        </div>`;
+      });
       html += renderSavedRow(`unlockL5ForTask('${selSp.id}','${selStep.id}','${selTask.id}')`);
     }
   }
@@ -1213,8 +1249,8 @@ function updateEditorTree(){
   let h = '';
   if(p.l1_name){
     h += `<div class="tree-process"><div class="tree-l1">${escapeHtml(p.l1_name)}</div>`;
-    p.subprocesses.forEach(sp=>{
-      if(!sp.name.trim()) return;
+    const namedSubprocesses = p.subprocesses.filter(sp=>sp.name.trim());
+    namedSubprocesses.forEach((sp, spIdx)=>{
       h += `<div class="tree-l2">${escapeHtml(sp.name)}</div>`;
       sp.steps.forEach(st=>{
         if(!st.text.trim()) return;
@@ -1229,7 +1265,7 @@ function updateEditorTree(){
           });
         });
       });
-      h += `<div class="tree-l2-divider"></div>`;
+      if(spIdx < namedSubprocesses.length-1) h += `<div class="tree-l2-divider"></div>`;
     });
     h += `</div>`;
   }
