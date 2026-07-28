@@ -66,7 +66,7 @@
   .card{ background:#fff; border:1px solid var(--gray-200); border-radius:14px; padding:18px 20px;
     margin-bottom:14px; transition:border-color .15s ease,background .15s ease; }
   .card.active{ border-color:var(--violet); box-shadow:0 0 0 3px var(--violet-light); }
-  .card.done{ border-color:var(--green-border); background:var(--green-bg); }
+  .card.done{ border-color:var(--gray-200); }
   .card.disabled{ opacity:.55; }
   .card-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:10px; }
   .card-head-left{ display:flex; align-items:center; gap:10px; }
@@ -1016,7 +1016,7 @@ function renderEditorLeftPanel(){
   let html = '';
 
   html += `<div class="card ${c2}">
-    <div class="card-head"><div class="card-head-left"><span class="badge badge-purple">L2</span><span class="card-title">Sub-processes</span></div>
+    <div class="card-head" style="${p.l2_locked?'opacity:.5;':''}"><div class="card-head-left"><span class="badge badge-purple">L2</span><span class="card-title">Sub-processes</span></div>
     <span class="card-hint">short noun phrases</span></div>`;
   if(!p.l2_locked){
     if(p.subprocesses.length===0) html += `<div class="empty-note">No sub-processes yet.</div>`;
@@ -1028,7 +1028,7 @@ function renderEditorLeftPanel(){
     });
     html += `<button class="link-btn" onclick="addSubprocess()">+ add sub-process</button>`;
   } else {
-    html += `<div class="empty-note" style="margin-bottom:8px;">Click a sub-process to work on it in L3. Click it again to switch to another one.</div>`;
+    html += `<div class="empty-note" style="margin-bottom:8px; opacity:.5;">Click a sub-process to work on it in L3. Click it again to switch to another one.</div>`;
     p.subprocesses.forEach(sp=>{
       const isSel = sp.id === state.editorSelectedSpId;
       const hasSteps = sp.steps.some(s=>s.text.trim());
@@ -1045,7 +1045,7 @@ function renderEditorLeftPanel(){
 
   /* ---------- L3: steps of the selected sub-process ---------- */
   html += `<div class="card ${c3}">
-    <div class="card-head"><div class="card-head-left"><span class="badge ${p.l2_locked?'badge-navy':'badge-gray'}">L3</span><span class="card-title">Process steps</span></div>
+    <div class="card-head" style="${(selSp&&selSp.l3_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="badge ${p.l2_locked?'badge-navy':'badge-gray'}">L3</span><span class="card-title">Process steps</span></div>
     <span class="card-hint">verb first: "create...", "check..."</span></div>`;
   if(!p.l2_locked){ html += `<div class="empty-note">Save L2 first to add process steps.</div>`; }
   else if(p.subprocesses.length===0){ html += `<div class="empty-note">No sub-processes yet — add one in L2 above.</div>`; }
@@ -1064,7 +1064,7 @@ function renderEditorLeftPanel(){
       const hasAnyStep = selSp.steps.some(s=>s.text.trim());
       html += `<button id="l3-save-btn" class="lock-btn" ${!hasAnyStep ? 'disabled':''} onclick="lockL3ForSp('${selSp.id}')">Save L3 → select a step</button>`;
     } else {
-      html += `<div class="empty-note" style="margin-bottom:8px;">Click a step to work on its tasks in L4.</div>`;
+      html += `<div class="empty-note" style="margin-bottom:8px; opacity:.5;">Click a step to work on its tasks in L4.</div>`;
       selSp.steps.forEach(st=>{
         const isSel = st.id === state.editorSelectedStepId;
         const hasTasks = st.tasks.some(t=>t.text.trim());
@@ -1081,7 +1081,7 @@ function renderEditorLeftPanel(){
 
   /* ---------- L4: tasks of the selected step ---------- */
   html += `<div class="card ${c4}">
-    <div class="card-head"><div class="card-head-left"><span class="badge ${(selSp&&selSp.l3_locked)?'badge-navy':'badge-gray'}">L4</span><span class="card-title">Tasks</span></div>
+    <div class="card-head" style="${(selStep&&selStep.l4_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="badge ${(selSp&&selSp.l3_locked)?'badge-navy':'badge-gray'}">L4</span><span class="card-title">Tasks</span></div>
     <span class="card-hint">verb + object, e.g. "Enter customer ID"</span></div>`;
   if(!selSp || !selSp.l3_locked){ html += `<div class="empty-note">Save L3 for a sub-process first, then select a step.</div>`; }
   else if(!selStep){ html += `<div class="empty-note">Click a step in L3 above to work on its tasks here.</div>`; }
@@ -1099,7 +1099,7 @@ function renderEditorLeftPanel(){
       const hasAnyTask = selStep.tasks.some(t=>t.text.trim());
       html += `<button id="l4-save-btn" class="lock-btn" ${!hasAnyTask ? 'disabled':''} onclick="lockL4ForStep('${selSp.id}','${selStep.id}')">Save L4 → select a task for L5</button>`;
     } else {
-      html += `<div class="empty-note" style="margin-bottom:8px;">Click a task to work on its work instructions in L5.</div>`;
+      html += `<div class="empty-note" style="margin-bottom:8px; opacity:.5;">Click a task to work on its work instructions in L5.</div>`;
       selStep.tasks.forEach(task=>{
         const isSel = task.id === state.editorSelectedTaskId;
         const hasWI = task.work_instructions.some(wi=>wi.transaction.trim()||wi.field.trim()||wi.tool.trim());
@@ -1115,7 +1115,7 @@ function renderEditorLeftPanel(){
 
   /* ---------- L5: work instructions of the selected task ---------- */
   html += `<div class="card ${c5}">
-    <div class="card-head"><div class="card-head-left"><span class="badge ${selTask?'badge-green':'badge-gray'}">L5</span><span class="card-title">Work instructions</span></div>
+    <div class="card-head" style="${(selTask&&selTask.l5_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="badge ${selTask?'badge-green':'badge-gray'}">L5</span><span class="card-title">Work instructions</span></div>
     <span class="card-hint">system-specific: transaction, field, tool</span></div>`;
   if(!selStep || !selStep.l4_locked){
     html += `<div class="empty-note">Save L4 for a step first, then select a task.</div>`;
