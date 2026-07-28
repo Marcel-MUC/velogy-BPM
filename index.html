@@ -95,17 +95,10 @@
   .step-line{ display:flex; align-items:center; gap:8px; padding:7px 0; border-bottom:1px dashed var(--gray-200); }
   .step-line:last-child{ border-bottom:none; }
   .step-text{ flex:1; font-size:13px; }
-  .cls-btns{ display:flex; gap:6px; }
-  .cls-btn{ font-size:11.5px; font-weight:700; padding:4px 9px; border-radius:6px; cursor:pointer;
-    border:1px solid var(--gray-200); background:#fff; color:var(--gray-500); }
-  .cls-btn.critical.sel{ background:var(--red-bg); border-color:#fecaca; color:var(--red); }
-  .cls-btn.standard.sel{ background:var(--gray-100); border-color:var(--gray-200); color:var(--gray-700); }
   .task-block{ background:var(--gray-50); border:1px solid var(--gray-200); border-radius:10px; padding:10px 12px; margin-bottom:10px; }
   .task-block-header{ font-size:12px; color:var(--gray-500); margin-bottom:6px; }
   .wi-row{ display:grid; grid-template-columns:1fr 1fr 1fr 26px; gap:6px; margin-top:6px; }
   .wi-row input{ font-size:12.5px; padding:6px 8px; }
-  .tag{ font-size:10px; font-weight:700; padding:2px 6px; border-radius:5px; margin-left:6px; }
-  .tag-critical{ background:var(--red-bg); color:var(--red); } .tag-standard{ background:var(--gray-100); color:var(--gray-700); }
   .stats{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin:14px 0 18px; }
   .stat{ background:var(--gray-100); border-radius:10px; padding:12px 6px; text-align:center; }
   .stat .l{ font-size:11.5px; color:var(--gray-500); font-weight:600; }
@@ -325,7 +318,7 @@ async function createDepartment(name){
 /* ================= COMPANIES ================= */
 async function loadCompanies(){
   const { data, error } = await sb.from('companies')
-    .select('id, name, created_at, processes(id, l1_name, l2_locked, created_at, subprocesses(l3_locked, steps(classification, l4_locked)))')
+    .select('id, name, created_at, processes(id, l1_name, l2_locked, created_at, subprocesses(l3_locked, steps(l4_locked)))')
     .order('name');
   if(error){ toast(error.message); return; }
   (data||[]).forEach(c=>{ c.processes = (c.processes||[]).sort((a,b)=> a.l1_name.localeCompare(b.l1_name)); });
@@ -401,7 +394,7 @@ async function openEditor(processId){
       id, l1_name, company_id, department_id, created_by, l1_locked, l2_locked, l3_locked, l4_locked, created_at,
       companies ( name ),
       subprocesses ( id, name, position, l3_locked, l4_locked,
-        steps ( id, text, classification, position, l4_locked,
+        steps ( id, text, position, l4_locked,
           tasks ( id, text, position,
             work_instructions ( id, transaction, field, tool, position )
           )
@@ -457,14 +450,6 @@ function toggleTaskSelection(taskId){
   state.editorSelectedTaskId = (state.editorSelectedTaskId === taskId) ? null : taskId;
   renderEditorLeftPanel();
 }
-function getCriticalSteps(){
-  const out = [];
-  state.editorProcess.subprocesses.forEach(sp=> sp.steps.forEach(st=>{
-    if(st.classification==='critical') out.push({ sp, step: st });
-  }));
-  return out;
-}
-
 /* --- text edits (debounced db write, no full re-render) --- */
 function refreshSaveButton(btnId, enabled){
   const btn = document.getElementById(btnId);
@@ -550,11 +535,6 @@ async function unlockL3ForSp(spId){
   await sb.from('subprocesses').update({ l3_locked:false }).eq('id', spId);
   findSp(spId).l3_locked = false; renderEditor();
 }
-async function classifyStep(spId, stepId, cls){
-  await sb.from('steps').update({ classification: cls }).eq('id', stepId);
-  findStep(spId, stepId).classification = cls;
-  renderEditor();
-}
 async function addTask(spId, stepId){
   const st = findStep(spId, stepId);
   const position = st.tasks.length;
@@ -607,7 +587,7 @@ async function exportExcel(processIdOnly){
   let query = sb.from('processes').select(`
       l1_name, companies(name), departments(name),
       subprocesses ( name, position,
-        steps ( text, classification, position,
+        steps ( text, position,
           tasks ( text, position,
             work_instructions ( transaction, field, tool, position )
           )
@@ -628,8 +608,7 @@ async function exportExcel(processIdOnly){
           "Department": proc.departments ? proc.departments.name : '',
           "L1 Mega-cycle": proc.l1_name,
           "L2 Sub-process": sp.name,
-          "L3 Process step": st.text,
-          "Classification": st.classification || ''
+          "L3 Process step": st.text
         };
         const tasks = (st.tasks||[]).sort((a,b)=>a.position-b.position);
         if(tasks.length===0){ rows.push({...base, "L4 Task":'', "L5 Transaction":'', "L5 Field":'', "L5 Tool":''}); return; }
@@ -647,7 +626,7 @@ async function exportExcel(processIdOnly){
   });
   if(rows.length===0){ toast('Nothing to export.'); return; }
   const ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = [{wch:16},{wch:16},{wch:20},{wch:20},{wch:26},{wch:12},{wch:26},{wch:16},{wch:16},{wch:16}];
+  ws['!cols'] = [{wch:16},{wch:16},{wch:20},{wch:20},{wch:26},{wch:26},{wch:16},{wch:16},{wch:16}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Process Capture");
   XLSX.writeFile(wb, "Velogy_Process_Capture.xlsx");
@@ -840,7 +819,7 @@ function renderCompanyMegaCycles(c){
   return `<div style="margin-top:12px; display:flex; flex-direction:column; gap:8px;" onclick="event.stopPropagation()">
       ${c.processes.map(p=>{
         const subs = p.subprocesses || [];
-        const doneCount = subs.filter(sp=> sp.l3_locked && (sp.steps||[]).filter(st=>st.classification==='critical').every(st=>st.l4_locked)).length;
+        const doneCount = subs.filter(sp=> sp.l3_locked && (sp.steps||[]).every(st=>st.l4_locked)).length;
         return `<div class="sp-row company-process-row" onclick="openEditor('${p.id}')">
           <span>${escapeHtml(p.l1_name)}</span>
           <span style="font-size:11px; font-weight:600; opacity:.85;">${subs.length>0 ? `${doneCount}/${subs.length} sub-processes complete` : (p.l2_locked ? 'in progress' : 'not started')}</span>
@@ -1008,7 +987,7 @@ function renderEditorLeftPanel(){
 
   const c2 = p.l2_locked ? 'done' : 'active';
   const c3 = !p.l2_locked ? 'disabled' : (!selSp ? 'disabled' : (selSp.l3_locked ? 'done' : 'active'));
-  const c4 = (!selSp || !selSp.l3_locked) ? 'disabled' : (!selStep ? 'disabled' : (selStep.classification!=='critical' ? 'disabled' : (selStep.l4_locked ? 'done' : 'active')));
+  const c4 = (!selSp || !selSp.l3_locked) ? 'disabled' : (!selStep ? 'disabled' : (selStep.l4_locked ? 'done' : 'active'));
   const c5 = (!selStep || selStep.l4_locked!==true) ? 'disabled' : (selTask ? 'active' : 'disabled');
 
   let html = '';
@@ -1058,26 +1037,16 @@ function renderEditorLeftPanel(){
       });
       html += `<button class="link-btn" onclick="addStep('${selSp.id}')">+ add step</button>`;
       const hasAnyStep = selSp.steps.some(s=>s.text.trim());
-      html += `<button id="l3-save-btn" class="lock-btn" ${!hasAnyStep ? 'disabled':''} onclick="lockL3ForSp('${selSp.id}')">Save L3 → classify &amp; select a step</button>`;
+      html += `<button id="l3-save-btn" class="lock-btn" ${!hasAnyStep ? 'disabled':''} onclick="lockL3ForSp('${selSp.id}')">Save L3 → select a step</button>`;
     } else {
-      html += `<div class="empty-note" style="margin-bottom:8px;">Classify each step, then click one to work on its tasks in L4.</div>`;
+      html += `<div class="empty-note" style="margin-bottom:8px;">Click a step to work on its tasks in L4.</div>`;
       selSp.steps.forEach(st=>{
         const isSel = st.id === state.editorSelectedStepId;
         const hasTasks = st.tasks.some(t=>t.text.trim());
-        let badge;
-        if(isSel) badge = 'currently editing';
-        else if(st.classification==='critical') badge = hasTasks ? '✓ has tasks' : 'needs tasks';
-        else if(st.classification==='standard') badge = 'no tasks needed';
-        else badge = 'not classified';
-        html += `<div class="sp-row ${isSel?'sel':''}" onclick="toggleStepSelection('${st.id}')" style="flex-direction:column; align-items:stretch; gap:8px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
-            <span>${escapeHtml(st.text)}</span>
-            <span style="font-size:11px; font-weight:600; opacity:.85; white-space:nowrap;">${badge}</span>
-          </div>
-          <div class="cls-btns" onclick="event.stopPropagation()">
-            <button class="cls-btn critical ${st.classification==='critical'?'sel':''}" onclick="event.stopPropagation(); classifyStep('${selSp.id}','${st.id}','critical')">Critical</button>
-            <button class="cls-btn standard ${st.classification==='standard'?'sel':''}" onclick="event.stopPropagation(); classifyStep('${selSp.id}','${st.id}','standard')">Standard</button>
-          </div>
+        const badge = isSel ? 'currently editing' : (hasTasks ? '✓ has tasks' : 'click to edit');
+        html += `<div class="sp-row ${isSel?'sel':''}" onclick="toggleStepSelection('${st.id}')">
+          <span>${escapeHtml(st.text)}</span>
+          <span style="font-size:11px; font-weight:600; opacity:.85; white-space:nowrap;">${badge}</span>
         </div>`;
       });
       html += `<button class="lock-btn done-btn" onclick="unlockL3ForSp('${selSp.id}')">✓ Saved — click to edit steps</button>`;
@@ -1087,13 +1056,12 @@ function renderEditorLeftPanel(){
 
   /* ---------- L4: tasks of the selected step ---------- */
   html += `<div class="card ${c4}">
-    <div class="card-head"><div class="card-head-left"><span class="badge ${(selSp&&selSp.l3_locked)?'badge-navy':'badge-gray'}">L4</span><span class="card-title">Tasks (critical steps only)</span></div>
+    <div class="card-head"><div class="card-head-left"><span class="badge ${(selSp&&selSp.l3_locked)?'badge-navy':'badge-gray'}">L4</span><span class="card-title">Tasks</span></div>
     <span class="card-hint">verb + object, e.g. "Enter customer ID"</span></div>`;
   if(!selSp || !selSp.l3_locked){ html += `<div class="empty-note">Save L3 for a sub-process first, then select a step.</div>`; }
   else if(!selStep){ html += `<div class="empty-note">Click a step in L3 above to work on its tasks here.</div>`; }
-  else if(selStep.classification !== 'critical'){ html += `<div class="empty-note">"${escapeHtml(selStep.text)}" is standard — no tasks needed for this step.</div>`; }
   else {
-    html += `<div class="subblock-title" style="margin-bottom:10px;">${escapeHtml(selStep.text)} <span class="tag tag-critical">critical</span></div>`;
+    html += `<div class="subblock-title" style="margin-bottom:10px;">${escapeHtml(selStep.text)}</div>`;
     if(!selStep.l4_locked){
       if(selStep.tasks.length===0) html += `<div class="empty-note">No tasks yet.</div>`;
       selStep.tasks.forEach(task=>{
@@ -1124,8 +1092,8 @@ function renderEditorLeftPanel(){
   html += `<div class="card ${c5}">
     <div class="card-head"><div class="card-head-left"><span class="badge ${selTask?'badge-green':'badge-gray'}">L5</span><span class="card-title">Work instructions</span></div>
     <span class="card-hint">system-specific: transaction, field, tool</span></div>`;
-  if(!selStep || selStep.classification!=='critical' || !selStep.l4_locked){
-    html += `<div class="empty-note">Save L4 for a critical step first, then select a task.</div>`;
+  if(!selStep || !selStep.l4_locked){
+    html += `<div class="empty-note">Save L4 for a step first, then select a task.</div>`;
   } else if(!selTask){
     html += `<div class="empty-note">Click a task in L4 above to add its work instructions here.</div>`;
   } else {
@@ -1170,8 +1138,7 @@ function updateEditorTree(){
       h += `<div class="tree-l2">${escapeHtml(sp.name)}</div>`;
       sp.steps.forEach(st=>{
         if(!st.text.trim()) return;
-        const clsTag = st.classification ? `<span class="tag tag-${st.classification}">${st.classification}</span>` : '';
-        h += `<div class="tree-l3">${escapeHtml(st.text)} ${clsTag}</div>`;
+        h += `<div class="tree-l3">${escapeHtml(st.text)}</div>`;
         st.tasks.forEach(task=>{
           if(!task.text.trim()) return;
           h += `<div class="tree-l4">${escapeHtml(task.text)}</div>`;
