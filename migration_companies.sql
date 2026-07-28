@@ -92,6 +92,38 @@ $$;
 
 grant execute on function create_company_with_processes(text, text[]) to authenticated;
 
+-- 4) Delete a company (and everything under it) --------------------------------
+-- Deleting a company must cascade to its processes, which already cascade down
+-- to subprocesses/steps/tasks/work_instructions per your existing schema — so
+-- making this one FK cascade is enough to make company deletion complete in
+-- one statement. The default constraint name below matches what Postgres
+-- generated for the company_id column added in section 2; if you renamed it,
+-- adjust the "drop constraint" line to match.
+alter table processes drop constraint if exists processes_company_id_fkey;
+alter table processes add constraint processes_company_id_fkey
+  foreign key (company_id) references companies(id) on delete cascade;
+
+create or replace function delete_company(p_company_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_role text;
+begin
+  select role into v_role from profiles where id = v_uid;
+  if v_role is distinct from 'admin' then
+    raise exception 'Only admins can delete companies';
+  end if;
+
+  delete from companies where id = p_company_id;
+end;
+$$;
+
+grant execute on function delete_company(uuid) to authenticated;
+
 -- ============================================================================
 -- IMPORTANT — review before/after running:
 --

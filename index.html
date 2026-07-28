@@ -362,6 +362,23 @@ async function addProcessToCompany(companyId, name){
   toast('Process added.');
   await loadCompanies(); render();
 }
+async function deleteCompany(companyId){
+  const c = state.companies.find(x=>x.id===companyId);
+  if(!c) return;
+  const hasData = (c.processes||[]).some(p=> (p.subprocesses||[]).length>0);
+  const msg = c.processes.length===0
+    ? `Delete "${c.name}"? This company has no mega-cycles yet.`
+    : hasData
+      ? `Delete "${c.name}"? This will permanently remove all ${c.processes.length} mega-cycle(s) and all captured data (sub-processes, steps, tasks, work instructions) inside them. This cannot be undone.`
+      : `Delete "${c.name}"? This will permanently remove its ${c.processes.length} mega-cycle(s). This cannot be undone.`;
+  if(!window.confirm(msg)) return;
+  const { error } = await sb.rpc('delete_company', { p_company_id: companyId });
+  if(error){ toast(error.message); return; }
+  state.companySettingsFor = null;
+  state.expandedCompanyId = null;
+  toast('Company deleted.');
+  await loadCompanies(); render();
+}
 async function removeProcessFromCompany(processId){
   const { count } = await sb.from('subprocesses').select('id', { count:'exact', head:true }).eq('process_id', processId);
   const hasData = (count || 0) > 0;
@@ -857,7 +874,8 @@ function renderCompanySettingsModal(){
         <input type="text" id="cs-new-process-name" placeholder="New mega-cycle name">
         <button class="btn btn-primary" style="flex-shrink:0;" onclick="addProcessToCompany('${c.id}', document.getElementById('cs-new-process-name').value); document.getElementById('cs-new-process-name').value='';">Add</button>
       </div>
-      <button class="link-btn" style="margin-top:14px;" onclick="closeCompanySettings()">Close</button>
+      <button class="btn btn-danger" style="margin-top:18px; width:100%;" onclick="deleteCompany('${c.id}')">Delete company</button>
+      <button class="link-btn" style="margin-top:10px;" onclick="closeCompanySettings()">Close</button>
     </div>
   </div>`;
 }
