@@ -870,7 +870,6 @@ function renderCompanyList(){
           <div style="display:flex; justify-content:space-between; align-items:center; width:100%; gap:10px; flex-wrap:wrap;">
             <h3 style="margin:0;">${escapeHtml(c.name)}</h3>
             <div class="actions" onclick="event.stopPropagation()">
-              <span style="font-size:12px; color:var(--gray-500);">${c.processes.length} mega-cycle${c.processes.length===1?'':'s'}</span>
               <button class="btn btn-ghost" onclick="exportExcel(null, '${c.id}')">⭳ Export</button>
               ${state.profile.role==='admin' ? `<button class="btn btn-ghost" onclick="openCompanySettings('${c.id}')">⋯</button>` : ''}
             </div>
@@ -920,7 +919,7 @@ function renderCompanySettingsModal(){
   return `<div class="modal-overlay" onclick="if(event.target===this) closeCompanySettings()">
     <div class="modal" style="width:460px;">
       <h3 style="margin-bottom:2px;">${escapeHtml(c.name)}</h3>
-      <p style="margin:0 0 16px; font-size:12px; color:var(--gray-500); font-weight:600; text-transform:uppercase; letter-spacing:.03em;">Mega-cycles</p>
+      <p style="margin:0 0 16px; font-size:12px; color:var(--gray-500); font-weight:600; text-transform:uppercase; letter-spacing:.03em;">Mega-cycles (${c.processes.length})</p>
       ${c.processes.length===0 ? `<div class="empty-note">No mega-cycles yet.</div>` : `<div style="display:flex; flex-direction:column; gap:2px;">${c.processes.map(p=>`
         <div class="row-input" style="padding:6px 0; border-bottom:1px solid var(--gray-100);">
           <span style="flex:1; font-size:13.5px;">${escapeHtml(p.l1_name)}</span>
