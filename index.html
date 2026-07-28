@@ -919,7 +919,7 @@ function renderRejected(){
 function renderCompanySelect(){
   return `${renderHeader()}
   <div class="wrap">
-    <div class="header" style="padding:14px 24px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px; padding-left:16px;">
       <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Companies</div>
       <div class="actions">
         ${state.profile.role==='admin' ? `<button class="btn btn-dark" onclick="openNewCompanyModal()">+ Add company</button>` : ''}
@@ -1013,7 +1013,7 @@ function renderCompanySettingsModal(){
 function renderAdmin(){
   return `${renderHeader()}
   <div class="wrap">
-    <div class="header" style="padding:14px 24px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px; padding-left:24px;">
       <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Admin</div>
       <button class="btn btn-ghost" onclick="backToCompanies()">← Back to companies</button>
     </div>
