@@ -815,7 +815,14 @@ async function updateUser(id){
 /* ================= RENDER ================= */
 function render(){
   const app = document.getElementById('app');
-  if(state.screen==='loading') app.innerHTML = `<div class="center-wrap"><div class="auth-card status-box"><div class="spinner"></div>Loading…</div></div>`;
+  if(state.screen==='loading'){
+    app.innerHTML = state.profile
+      ? `${renderHeader()}
+        <div style="min-height:calc(100vh - 80px); display:flex; align-items:center; justify-content:center;">
+          <div class="status-box"><div class="spinner"></div>Loading…</div>
+        </div>`
+      : `<div class="center-wrap"><div class="auth-card status-box"><div class="spinner"></div>Loading…</div></div>`;
+  }
   else if(state.screen==='connection-error') app.innerHTML = `<div class="center-wrap"><div class="auth-card status-box">
       <div class="status-icon">⚠️</div>
       <h2>Connection failed</h2>
