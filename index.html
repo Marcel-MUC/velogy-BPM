@@ -17,8 +17,10 @@
   }
   *{box-sizing:border-box;}
   body{ margin:0; font-family:'Manrope',-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
-    background:var(--gray-100); color:var(--gray-900); padding:20px; }
-  .wrap{ max-width:1400px; margin:0 auto; }
+    background:var(--gray-100); color:var(--gray-900); }
+  .topbar{ background:#fff; border-bottom:1px solid var(--gray-200); padding:16px 40px;
+    display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; }
+  .wrap{ max-width:1400px; margin:0 auto; padding:20px; }
   .header{ background:#fff; border:1px solid var(--gray-200); border-radius:14px; padding:18px 24px;
     display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:12px; }
   .brand{ display:flex; align-items:center; gap:14px; }
@@ -780,7 +782,7 @@ function render(){
 
 function renderHeader(activeLabel){
   const roleClass = state.profile.role==='admin' ? 'pill-admin' : (state.profile.role==='process_owner' ? 'pill-owner' : 'pill-viewer');
-  return `<div class="header">
+  return `<div class="topbar">
     <div class="brand" style="cursor:pointer;" onclick="backToCompanies()" title="Back to companies">
       <div class="logo">V</div>
       <div><h1>Velogy — Process Capture</h1><p>Phase 1 tool for Process Owners</p></div>
@@ -861,12 +863,12 @@ function renderRejected(){
 }
 
 function renderCompanySelect(){
-  return `<div class="wrap">
-    ${renderHeader()}
+  return `${renderHeader()}
+  <div class="wrap">
     <div class="header" style="padding:14px 24px;">
-      <div style="font-weight:700; font-size:15px;">Companies</div>
+      <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Companies</div>
       <div class="actions">
-        ${state.profile.role==='admin' ? `<button class="btn btn-primary" onclick="openNewCompanyModal()">+ Add company</button>` : ''}
+        ${state.profile.role==='admin' ? `<button class="btn btn-dark" onclick="openNewCompanyModal()">+ Add company</button>` : ''}
         <button class="btn btn-ghost" onclick="exportExcel()">⭳ Export all</button>
       </div>
     </div>
@@ -955,10 +957,10 @@ function renderCompanySettingsModal(){
 }
 
 function renderAdmin(){
-  return `<div class="wrap">
-    ${renderHeader()}
+  return `${renderHeader()}
+  <div class="wrap">
     <div class="header" style="padding:14px 24px;">
-      <div style="font-weight:700; font-size:15px;">Admin</div>
+      <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Admin</div>
       <button class="btn btn-ghost" onclick="backToCompanies()">← Back to companies</button>
     </div>
     <div class="card">
@@ -1031,8 +1033,8 @@ function renderEditor(){
   const app = document.getElementById('app');
   const p = state.editorProcess;
   const companyName = p.companies ? p.companies.name : '';
-  app.innerHTML = `<div class="wrap">
-    ${renderHeader()}
+  app.innerHTML = `${renderHeader()}
+  <div class="wrap">
     <div class="header" style="padding:14px 24px; flex-wrap:wrap;">
       <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">${escapeHtml(companyName)} — ${escapeHtml(p.l1_name || '')}</div>
