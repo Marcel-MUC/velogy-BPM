@@ -167,20 +167,21 @@ let state = {
   user: null,
   profile: null,
   departments: [],
-  processList: [],
+  companies: [],
+  expandedCompanyId: null,
+  showNewCompanyModal: false,
+  newCompanyProcessNames: [],
+  companySettingsFor: null,
   editorProcess: null,
+  editorSiblingProcesses: [],
+  editingMegaCycle: false,
   editorSelectedSpId: null,
   editorSelectedStepId: null,
   editorSelectedTaskId: null,
   adminTab: 'pending',
   adminPending: [],
   adminUsers: [],
-  authError: '',
-  showNewProcessModal: false,
-  showNewDeptInline: false,
-  lastCreatedDeptId: null,
-  dashboardSearch: '',
-  dashboardSort: 'newest'
+  authError: ''
 };
 
 function escapeHtml(s){
@@ -256,9 +257,8 @@ async function loadMyProfile(){
   if(data.status === 'pending') state.screen = 'pending';
   else if(data.status === 'rejected') state.screen = 'rejected';
   else {
-    state.screen = 'dashboard';
-    await loadDepartments();
-    await loadProcessList();
+    state.screen = 'companies';
+    await loadCompanies();
   }
 }
 async function doSignUp(email, password, fullName){
@@ -279,12 +279,13 @@ async function doSignIn(email, password){
 }
 async function doSignOut(){
   await sb.auth.signOut();
-  state = { screen:'login', user:null, profile:null, departments:[], processList:[], editorProcess:null,
+  state = { screen:'login', user:null, profile:null, departments:[],
+    companies:[], expandedCompanyId:null, showNewCompanyModal:false, newCompanyProcessNames:[], companySettingsFor:null,
+    editorProcess:null, editorSiblingProcesses:[], editingMegaCycle:false,
     editorSelectedSpId:null,
     editorSelectedStepId:null,
     editorSelectedTaskId:null,
-    adminTab:'pending', adminPending:[], adminUsers:[], authError:'', showNewProcessModal:false,
-    showNewDeptInline:false, lastCreatedDeptId:null, dashboardSearch:'', dashboardSort:'newest' };
+    adminTab:'pending', adminPending:[], adminUsers:[], authError:'' };
   render();
 }
 async function doForgotPassword(email){
@@ -319,52 +320,67 @@ async function createDepartment(name){
   toast('Department created.');
   await loadDepartments(); render();
 }
-async function createDepartmentInline(name){
-  if(!name.trim()){ toast('Please enter a name.'); return; }
-  const { data, error } = await sb.from('departments').insert({ name: name.trim() }).select().single();
+/* ================= COMPANIES ================= */
+async function loadCompanies(){
+  const { data, error } = await sb.from('companies')
+    .select('id, name, created_at, processes(id, l1_name, l2_locked, created_at, subprocesses(l3_locked, steps(classification, l4_locked)))')
+    .order('name');
   if(error){ toast(error.message); return; }
-  state.departments.push(data);
-  state.departments.sort((a,b)=>a.name.localeCompare(b.name));
-  state.lastCreatedDeptId = data.id;
-  state.showNewDeptInline = false;
-  toast('Department created.');
+  (data||[]).forEach(c=>{ c.processes = (c.processes||[]).sort((a,b)=> a.l1_name.localeCompare(b.l1_name)); });
+  state.companies = data || [];
+}
+function toggleCompanyExpand(companyId){
+  state.expandedCompanyId = (state.expandedCompanyId === companyId) ? null : companyId;
   render();
 }
-
-/* ================= DASHBOARD / PROCESS LIST ================= */
-async function loadProcessList(){
-  const { data, error } = await sb.from('processes')
-    .select('id, l1_name, department_id, l1_locked, l2_locked, created_at, departments(name), subprocesses(l3_locked, steps(classification, l4_locked))')
-    .order('created_at', { ascending:false });
-  if(error){ toast(error.message); return; }
-  state.processList = data || [];
+function openNewCompanyModal(){
+  state.showNewCompanyModal = true;
+  state.newCompanyProcessNames = [...MEGA_CYCLES];
+  render();
 }
-function openNewProcessModal(){ state.showNewProcessModal = true; render(); }
-function closeNewProcessModal(){ state.showNewProcessModal = false; render(); }
-async function createProcess(l1Name, departmentId){
-  if(!l1Name){ toast('Please choose a mega-cycle.'); return; }
-  const dept = departmentId || state.profile.department_id;
-  if(!dept){ toast('Please choose a department.'); return; }
-  const { data, error } = await sb.from('processes')
-    .insert({ l1_name: l1Name, department_id: dept, created_by: state.profile.id })
+function closeNewCompanyModal(){ state.showNewCompanyModal = false; render(); }
+function addDraftProcessName(){ state.newCompanyProcessNames.push(''); render(); }
+function removeDraftProcessName(idx){ state.newCompanyProcessNames.splice(idx,1); render(); }
+function onDraftProcessNameInput(idx, v){ state.newCompanyProcessNames[idx] = v; }
+async function submitNewCompany(name){
+  if(!name || !name.trim()){ toast('Please enter a company name.'); return; }
+  const names = state.newCompanyProcessNames.map(n=>n.trim()).filter(Boolean);
+  const { error } = await sb.rpc('create_company_with_processes', { p_name: name.trim(), p_process_names: names });
+  if(error){ toast(error.message); return; }
+  state.showNewCompanyModal = false;
+  toast('Company created.');
+  await loadCompanies(); render();
+}
+function openCompanySettings(companyId){ state.companySettingsFor = companyId; render(); }
+function closeCompanySettings(){ state.companySettingsFor = null; render(); }
+async function addProcessToCompany(companyId, name){
+  if(!name || !name.trim()){ toast('Please enter a process name.'); return; }
+  const { error } = await sb.from('processes')
+    .insert({ l1_name: name.trim(), company_id: companyId, created_by: state.profile.id, l1_locked:true })
     .select().single();
   if(error){ toast(error.message); return; }
-  state.showNewProcessModal = false;
-  toast('Process created.');
-  await openEditor(data.id);
+  toast('Process added.');
+  await loadCompanies(); render();
 }
-async function deleteProcess(id){
-  const { error } = await sb.from('processes').delete().eq('id', id);
+async function removeProcessFromCompany(processId){
+  const { count } = await sb.from('subprocesses').select('id', { count:'exact', head:true }).eq('process_id', processId);
+  const hasData = (count || 0) > 0;
+  const msg = hasData
+    ? 'This mega-cycle already has captured data (sub-processes, steps, tasks, or work instructions). Deleting it will permanently remove all of it. Continue?'
+    : 'Delete this mega-cycle?';
+  if(!window.confirm(msg)) return;
+  const { error } = await sb.from('processes').delete().eq('id', processId);
   if(error){ toast(error.message); return; }
-  toast('Process deleted.');
-  await loadProcessList(); render();
+  toast('Mega-cycle removed.');
+  await loadCompanies(); render();
 }
 
 /* ================= EDITOR ================= */
 async function openEditor(processId){
   state.screen = 'loading'; render();
   const { data, error } = await sb.from('processes').select(`
-      id, l1_name, department_id, created_by, l1_locked, l2_locked, l3_locked, l4_locked, created_at,
+      id, l1_name, company_id, department_id, created_by, l1_locked, l2_locked, l3_locked, l4_locked, created_at,
+      companies ( name ),
       subprocesses ( id, name, position, l3_locked, l4_locked,
         steps ( id, text, classification, position, l4_locked,
           tasks ( id, text, position,
@@ -373,7 +389,7 @@ async function openEditor(processId){
         )
       )
     `).eq('id', processId).single();
-  if(error){ toast(error.message); state.screen = 'dashboard'; render(); return; }
+  if(error){ toast(error.message); state.screen = 'companies'; render(); return; }
   data.subprocesses = data.subprocesses || [];
   data.subprocesses.forEach(sp=>{
     sp.steps = sp.steps || [];
@@ -386,12 +402,23 @@ async function openEditor(processId){
   state.editorSelectedSpId = (data.l2_locked && data.subprocesses.length>0) ? data.subprocesses[0].id : null;
   state.editorSelectedStepId = null;
   state.editorSelectedTaskId = null;
+  state.editingMegaCycle = false;
+  const { data: siblings } = await sb.from('processes').select('id, l1_name').eq('company_id', data.company_id).order('l1_name');
+  state.editorSiblingProcesses = siblings || [];
   state.screen = 'editor';
   render();
 }
-function backToDashboard(){
-  state.editorProcess = null; state.screen = 'dashboard';
-  loadProcessList().then(render);
+function backToCompanies(){
+  state.editorProcess = null; state.screen = 'companies';
+  loadCompanies().then(render);
+}
+function toggleMegaCycleSwitcher(){
+  state.editingMegaCycle = !state.editingMegaCycle;
+  renderEditor();
+}
+function switchMegaCycle(newProcessId){
+  if(!newProcessId) return;
+  openEditor(newProcessId);
 }
 function findSp(spId){ return state.editorProcess.subprocesses.find(s=>s.id===spId); }
 function toggleSpSelection(spId){
@@ -420,7 +447,6 @@ function getCriticalSteps(){
 }
 
 /* --- text edits (debounced db write, no full re-render) --- */
-function onL1NameInput(v){ state.editorProcess.l1_name = v; }
 function onSubName(spId, v){
   findSp(spId).name = v; updateEditorTree();
   debounced('sp-'+spId, ()=> sb.from('subprocesses').update({ name:v }).eq('id', spId));
@@ -440,16 +466,6 @@ function onWI(spId, stepId, taskId, wiId, field, v){
 }
 
 /* --- structural actions (await db, then re-render) --- */
-async function lockL1(){
-  if(!state.editorProcess.l1_name) return;
-  const { error } = await sb.from('processes').update({ l1_name: state.editorProcess.l1_name, l1_locked:true }).eq('id', state.editorProcess.id);
-  if(error){ toast(error.message); return; }
-  state.editorProcess.l1_locked = true; renderEditor();
-}
-async function unlockL1(){
-  await sb.from('processes').update({ l1_locked:false }).eq('id', state.editorProcess.id);
-  state.editorProcess.l1_locked = false; renderEditor();
-}
 async function addSubprocess(){
   const position = state.editorProcess.subprocesses.length;
   const { data, error } = await sb.from('subprocesses').insert({ process_id: state.editorProcess.id, name:'', position }).select().single();
@@ -563,7 +579,7 @@ async function unlockL4ForStep(spId, stepId){
 /* ================= EXCEL EXPORT ================= */
 async function exportExcel(processIdOnly){
   let query = sb.from('processes').select(`
-      l1_name, departments(name),
+      l1_name, companies(name), departments(name),
       subprocesses ( name, position,
         steps ( text, classification, position,
           tasks ( text, position,
@@ -582,6 +598,7 @@ async function exportExcel(processIdOnly){
       (sp.steps||[]).sort((a,b)=>a.position-b.position).forEach(st=>{
         if(!st.text || !st.text.trim()) return;
         const base = {
+          "Company": proc.companies ? proc.companies.name : '',
           "Department": proc.departments ? proc.departments.name : '',
           "L1 Mega-cycle": proc.l1_name,
           "L2 Sub-process": sp.name,
@@ -604,7 +621,7 @@ async function exportExcel(processIdOnly){
   });
   if(rows.length===0){ toast('Nothing to export.'); return; }
   const ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = [{wch:16},{wch:20},{wch:20},{wch:26},{wch:12},{wch:26},{wch:16},{wch:16},{wch:16}];
+  ws['!cols'] = [{wch:16},{wch:16},{wch:20},{wch:20},{wch:26},{wch:12},{wch:26},{wch:16},{wch:16},{wch:16}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Process Capture");
   XLSX.writeFile(wb, "Velogy_Process_Capture.xlsx");
@@ -668,7 +685,7 @@ function render(){
   else if(state.screen==='reset-password') app.innerHTML = renderResetPassword();
   else if(state.screen==='pending') app.innerHTML = renderPending();
   else if(state.screen==='rejected') app.innerHTML = renderRejected();
-  else if(state.screen==='dashboard') app.innerHTML = renderDashboard();
+  else if(state.screen==='companies') app.innerHTML = renderCompanySelect();
   else if(state.screen==='admin') app.innerHTML = renderAdmin();
   else if(state.screen==='editor') renderEditor();
 }
@@ -755,113 +772,92 @@ function renderRejected(){
   </div></div>`;
 }
 
-function renderDashboard(){
-  let list = [...state.processList];
-  const q = (state.dashboardSearch || '').trim().toLowerCase();
-  if(q){
-    list = list.filter(p =>
-      p.l1_name.toLowerCase().includes(q) ||
-      (p.departments && p.departments.name.toLowerCase().includes(q))
-    );
-  }
-  if(state.dashboardSort === 'newest') list.sort((a,b)=> new Date(b.created_at)-new Date(a.created_at));
-  else if(state.dashboardSort === 'oldest') list.sort((a,b)=> new Date(a.created_at)-new Date(b.created_at));
-  else if(state.dashboardSort === 'name') list.sort((a,b)=> a.l1_name.localeCompare(b.l1_name));
-  else if(state.dashboardSort === 'department') list.sort((a,b)=> (a.departments?.name||'').localeCompare(b.departments?.name||''));
-
+function renderCompanySelect(){
   return `<div class="wrap">
     ${renderHeader()}
     <div class="header" style="padding:14px 24px;">
-      <div style="font-weight:700; font-size:15px;">Processes — ${state.profile.role==='admin' ? 'all departments' : 'your department'}</div>
+      <div style="font-weight:700; font-size:15px;">Companies</div>
       <div class="actions">
-        <button class="btn btn-primary" onclick="openNewProcessModal()">+ New Process</button>
-        <button class="btn btn-ghost" onclick="exportExcel()">⭳ Export to Excel</button>
+        ${state.profile.role==='admin' ? `<button class="btn btn-primary" onclick="openNewCompanyModal()">+ Add company</button>` : ''}
+        <button class="btn btn-ghost" onclick="exportExcel()">⭳ Export all to Excel</button>
       </div>
     </div>
-    <div class="header" style="padding:12px 24px; gap:10px;">
-      <input type="text" placeholder="Search by mega-cycle or department…" value="${escapeHtml(state.dashboardSearch)}"
-        style="max-width:320px;" oninput="state.dashboardSearch=this.value; renderDashboardListOnly();">
-      <select style="max-width:200px;" onchange="state.dashboardSort=this.value; render();">
-        <option value="newest" ${state.dashboardSort==='newest'?'selected':''}>Newest first</option>
-        <option value="oldest" ${state.dashboardSort==='oldest'?'selected':''}>Oldest first</option>
-        <option value="name" ${state.dashboardSort==='name'?'selected':''}>By mega-cycle (A-Z)</option>
-        <option value="department" ${state.dashboardSort==='department'?'selected':''}>By department (A-Z)</option>
-      </select>
-    </div>
-    <div class="dash-list" id="dashList">
-      ${renderDashList(list)}
+    <div class="dash-list">
+      ${renderCompanyList()}
     </div>
   </div>
-  ${state.showNewProcessModal ? renderNewProcessModal() : ''}`;
+  ${state.showNewCompanyModal ? renderNewCompanyModal() : ''}
+  ${state.companySettingsFor ? renderCompanySettingsModal() : ''}`;
 }
 
-function renderDashList(list){
-  if(list.length===0) return `<div class="empty-note" style="text-align:center; padding:40px;">${state.processList.length===0 ? 'No processes yet — create the first one with "+ New Process".' : 'No processes found.'}</div>`;
-  return list.map(p=>{
-    const subs = p.subprocesses || [];
-    const doneCount = subs.filter(sp=> sp.l3_locked && (sp.steps||[]).filter(st=>st.classification==='critical').every(st=>st.l4_locked)).length;
+function renderCompanyList(){
+  if(state.companies.length===0) return `<div class="empty-note" style="text-align:center; padding:40px;">${state.profile.role==='admin' ? 'No companies yet — create the first one with "+ Add company".' : 'No companies yet.'}</div>`;
+  return state.companies.map(c=>{
+    const isExp = state.expandedCompanyId === c.id;
     return `
-        <div class="dash-item">
-          <div>
-            <h3>${escapeHtml(p.l1_name)}</h3>
-            <div class="meta">${escapeHtml(p.departments ? p.departments.name : '')} · created ${new Date(p.created_at).toLocaleDateString('en-US')}</div>
-            <div class="progress-dots">
-              <div class="dot ${p.l1_locked?'on':''}"></div><div class="dot ${p.l2_locked?'on':''}"></div>
-              <span style="font-size:11px; color:var(--gray-500); margin-left:6px;">${subs.length>0 ? `${doneCount}/${subs.length} sub-processes complete` : ''}</span>
+        <div class="dash-item" style="flex-direction:column; align-items:stretch; cursor:pointer;" onclick="toggleCompanyExpand('${c.id}')">
+          <div style="display:flex; justify-content:space-between; align-items:center; width:100%; gap:10px; flex-wrap:wrap;">
+            <h3 style="margin:0;">${escapeHtml(c.name)}</h3>
+            <div class="actions" onclick="event.stopPropagation()">
+              <span style="font-size:12px; color:var(--gray-500);">${c.processes.length} mega-cycle${c.processes.length===1?'':'s'}</span>
+              ${state.profile.role==='admin' ? `<button class="btn btn-ghost" onclick="openCompanySettings('${c.id}')">⋯</button>` : ''}
             </div>
           </div>
-          <div class="actions">
-            <button class="btn btn-primary" onclick="openEditor('${p.id}')">Open</button>
-            <button class="btn btn-ghost" onclick="exportExcel('${p.id}')">Export</button>
-            ${(state.profile.role==='admin') ? `<button class="btn btn-danger" onclick="if(window.confirm('Delete this process?')) deleteProcess('${p.id}')">Delete</button>` : ''}
-          </div>
+          ${isExp ? renderCompanyMegaCycles(c) : ''}
         </div>
       `;
   }).join('');
 }
 
-function renderDashboardListOnly(){
-  let list = [...state.processList];
-  const q = (state.dashboardSearch || '').trim().toLowerCase();
-  if(q){
-    list = list.filter(p =>
-      p.l1_name.toLowerCase().includes(q) ||
-      (p.departments && p.departments.name.toLowerCase().includes(q))
-    );
-  }
-  if(state.dashboardSort === 'newest') list.sort((a,b)=> new Date(b.created_at)-new Date(a.created_at));
-  else if(state.dashboardSort === 'oldest') list.sort((a,b)=> new Date(a.created_at)-new Date(b.created_at));
-  else if(state.dashboardSort === 'name') list.sort((a,b)=> a.l1_name.localeCompare(b.l1_name));
-  else if(state.dashboardSort === 'department') list.sort((a,b)=> (a.departments?.name||'').localeCompare(b.departments?.name||''));
-  const el = document.getElementById('dashList');
-  if(el) el.innerHTML = renderDashList(list);
+function renderCompanyMegaCycles(c){
+  if(c.processes.length===0) return `<div class="empty-note" style="padding:10px 0 0;">No mega-cycles yet for this company.${state.profile.role==='admin' ? ' Add some via the ⋯ menu.' : ''}</div>`;
+  return `<div style="margin-top:12px; display:flex; flex-direction:column; gap:8px;" onclick="event.stopPropagation()">
+      ${c.processes.map(p=>{
+        const subs = p.subprocesses || [];
+        const doneCount = subs.filter(sp=> sp.l3_locked && (sp.steps||[]).filter(st=>st.classification==='critical').every(st=>st.l4_locked)).length;
+        return `<div class="sp-row" onclick="openEditor('${p.id}')" style="background:#fff;">
+          <span>${escapeHtml(p.l1_name)}</span>
+          <span style="font-size:11px; font-weight:600; opacity:.85;">${subs.length>0 ? `${doneCount}/${subs.length} sub-processes complete` : (p.l2_locked ? 'in progress' : 'not started')}</span>
+        </div>`;
+      }).join('')}
+    </div>`;
 }
 
-function renderNewProcessModal(){
-  const showDeptPicker = state.profile.role==='admin';
-  return `<div class="modal-overlay" onclick="if(event.target===this) closeNewProcessModal()">
-    <div class="modal">
-      <h3>Create new process</h3>
-      <div class="field"><label>Mega-cycle (L1)</label>
-        <select id="np-l1">
-          <option value="">— choose —</option>
-          ${MEGA_CYCLES.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}
-        </select>
+function renderNewCompanyModal(){
+  return `<div class="modal-overlay" onclick="if(event.target===this) closeNewCompanyModal()">
+    <div class="modal" style="width:460px;">
+      <h3>Add company</h3>
+      <div class="field"><label>Company name</label><input type="text" id="nc-name" placeholder="e.g. Acme Corp"></div>
+      <div class="field"><label>Mega-cycle processes to create</label>
+        ${state.newCompanyProcessNames.map((name,idx)=>`
+          <div class="row-input">
+            <input type="text" value="${escapeHtml(name)}" oninput="onDraftProcessNameInput(${idx}, this.value)" placeholder="Mega-cycle name">
+            <button class="icon-btn" onclick="removeDraftProcessName(${idx})">✕</button>
+          </div>`).join('')}
+        <button class="link-btn" onclick="addDraftProcessName()">+ add custom process</button>
       </div>
-      ${showDeptPicker ? `<div class="field"><label>Department</label>
-        <select id="np-dept">
-          <option value="">— choose —</option>
-          ${state.departments.map(d=>`<option value="${d.id}" ${state.lastCreatedDeptId===d.id?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}
-        </select>
-        ${state.showNewDeptInline
-          ? `<div class="row-input" style="margin-top:8px;">
-              <input type="text" id="np-new-dept" placeholder="New department name">
-              <button class="btn btn-primary" style="flex-shrink:0;" onclick="createDepartmentInline(document.getElementById('np-new-dept').value)">OK</button>
-            </div>`
-          : `<button class="link-btn" style="margin-top:6px;" onclick="state.showNewDeptInline=true; render();">+ create new department</button>`}
-      </div>` : ''}
-      <button class="full-btn" onclick="createProcess(document.getElementById('np-l1').value, ${showDeptPicker ? "document.getElementById('np-dept').value" : "null"})">Create</button>
-      <button class="link-btn" style="margin-top:10px;" onclick="closeNewProcessModal()">Cancel</button>
+      <button class="full-btn" onclick="submitNewCompany(document.getElementById('nc-name').value)">Create</button>
+      <button class="link-btn" style="margin-top:10px;" onclick="closeNewCompanyModal()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+function renderCompanySettingsModal(){
+  const c = state.companies.find(x=>x.id===state.companySettingsFor);
+  if(!c) return '';
+  return `<div class="modal-overlay" onclick="if(event.target===this) closeCompanySettings()">
+    <div class="modal" style="width:460px;">
+      <h3>${escapeHtml(c.name)} — mega-cycles</h3>
+      ${c.processes.length===0 ? `<div class="empty-note">No mega-cycles yet.</div>` : c.processes.map(p=>`
+        <div class="row-input">
+          <span style="flex:1; font-size:13.5px;">${escapeHtml(p.l1_name)}</span>
+          <button class="icon-btn" onclick="removeProcessFromCompany('${p.id}')">✕</button>
+        </div>`).join('')}
+      <div class="row-input" style="margin-top:10px;">
+        <input type="text" id="cs-new-process-name" placeholder="New mega-cycle name">
+        <button class="btn btn-primary" style="flex-shrink:0;" onclick="addProcessToCompany('${c.id}', document.getElementById('cs-new-process-name').value); document.getElementById('cs-new-process-name').value='';">Add</button>
+      </div>
+      <button class="link-btn" style="margin-top:14px;" onclick="closeCompanySettings()">Close</button>
     </div>
   </div>`;
 }
@@ -871,7 +867,7 @@ function renderAdmin(){
     ${renderHeader()}
     <div class="header" style="padding:14px 24px;">
       <div style="font-weight:700; font-size:15px;">Admin</div>
-      <button class="btn btn-ghost" onclick="backToDashboard()">← Back to dashboard</button>
+      <button class="btn btn-ghost" onclick="backToCompanies()">← Back to companies</button>
     </div>
     <div class="card">
       <div class="tabs">
@@ -941,12 +937,22 @@ function renderAdminDepts(){
 /* ---------- editor rendering (left panel + right tree) ---------- */
 function renderEditor(){
   const app = document.getElementById('app');
+  const p = state.editorProcess;
+  const companyName = p.companies ? p.companies.name : '';
   app.innerHTML = `<div class="wrap">
     ${renderHeader()}
-    <div class="header" style="padding:14px 24px;">
-      <div style="font-weight:700; font-size:15px;">${escapeHtml(state.editorProcess.l1_name || 'New process')}</div>
+    <div class="header" style="padding:14px 24px; flex-wrap:wrap;">
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div style="font-weight:700; font-size:15px;">${escapeHtml(companyName)} — ${escapeHtml(p.l1_name || '')}</div>
+        <button class="btn btn-ghost" style="padding:5px 9px; font-size:12px;" onclick="toggleMegaCycleSwitcher()" title="Switch mega-cycle">✎</button>
+        ${state.editingMegaCycle ? `
+          <select onchange="switchMegaCycle(this.value)" style="width:auto; max-width:260px;">
+            <option value="">— switch to —</option>
+            ${state.editorSiblingProcesses.filter(s=>s.id!==p.id).map(s=>`<option value="${s.id}">${escapeHtml(s.l1_name)}</option>`).join('')}
+          </select>` : ''}
+      </div>
       <div class="actions">
-        <button class="btn btn-ghost" onclick="backToDashboard()">← Back</button>
+        <button class="btn btn-ghost" onclick="backToCompanies()">← Back</button>
         <button class="btn btn-ghost" onclick="exportExcel(state.editorProcess.id)">⭳ Export</button>
       </div>
     </div>
@@ -970,31 +976,17 @@ function renderEditorLeftPanel(){
   const selStep = (selSp && selSp.l3_locked) ? (selSp.steps.find(s=>s.id===state.editorSelectedStepId) || null) : null;
   const selTask = (selStep && selStep.l4_locked) ? (selStep.tasks.find(t=>t.id===state.editorSelectedTaskId) || null) : null;
 
-  const c1 = p.l1_locked ? 'done' : 'active';
-  const c2 = !p.l1_locked ? 'disabled' : (p.l2_locked ? 'done' : 'active');
+  const c2 = p.l2_locked ? 'done' : 'active';
   const c3 = !p.l2_locked ? 'disabled' : (!selSp ? 'disabled' : (selSp.l3_locked ? 'done' : 'active'));
   const c4 = (!selSp || !selSp.l3_locked) ? 'disabled' : (!selStep ? 'disabled' : (selStep.classification!=='critical' ? 'disabled' : (selStep.l4_locked ? 'done' : 'active')));
   const c5 = (!selStep || selStep.l4_locked!==true) ? 'disabled' : (selTask ? 'active' : 'disabled');
 
   let html = '';
 
-  html += `<div class="card ${c1}">
-    <div class="card-head"><div class="card-head-left"><span class="badge badge-purple">L1</span><span class="card-title">End-to-end mega-cycle</span></div>
-    <span class="card-hint">dropdown, 8 standards</span></div>
-    <select ${p.l1_locked?'disabled':''} onchange="onL1NameInput(this.value)">
-      <option value="">— select mega-cycle —</option>
-      ${MEGA_CYCLES.map(m=>`<option value="${escapeHtml(m)}" ${p.l1_name===m?'selected':''}>${escapeHtml(m)}</option>`).join('')}
-    </select>
-    ${p.l1_locked
-      ? `<button class="lock-btn done-btn" onclick="unlockL1()">✓ Locked — click to edit</button>`
-      : `<button class="lock-btn" ${!p.l1_name?'disabled':''} onclick="lockL1()">Lock L1 → go to L2</button>`}
-  </div>`;
-
   html += `<div class="card ${c2}">
-    <div class="card-head"><div class="card-head-left"><span class="badge ${p.l1_locked?'badge-purple':'badge-gray'}">L2</span><span class="card-title">Sub-processes</span></div>
+    <div class="card-head"><div class="card-head-left"><span class="badge badge-purple">L2</span><span class="card-title">Sub-processes</span></div>
     <span class="card-hint">short noun phrases</span></div>`;
-  if(!p.l1_locked){ html += `<div class="empty-note">Lock L1 first to add sub-processes.</div>`; }
-  else if(!p.l2_locked){
+  if(!p.l2_locked){
     if(p.subprocesses.length===0) html += `<div class="empty-note">No sub-processes yet.</div>`;
     p.subprocesses.forEach(sp=>{
       html += `<div class="row-input">
@@ -1014,14 +1006,14 @@ function renderEditorLeftPanel(){
       </div>`;
     });
   }
-  html += `<button class="lock-btn ${p.l2_locked?'done-btn':''}" ${p.l2_locked ? '' : (!p.l1_locked || !p.subprocesses.some(s=>s.name.trim()) ? 'disabled':'')} onclick="${p.l2_locked?'unlockL2()':'lockL2()'}">${p.l2_locked?'✓ Locked — click to edit':'Lock L2 → go to L3'}</button>
+  html += `<button class="lock-btn ${p.l2_locked?'done-btn':''}" ${p.l2_locked ? '' : (!p.subprocesses.some(s=>s.name.trim()) ? 'disabled':'')} onclick="${p.l2_locked?'unlockL2()':'lockL2()'}">${p.l2_locked?'✓ Saved — click to edit':'Save L2 → go to L3'}</button>
   </div>`;
 
   /* ---------- L3: steps of the selected sub-process ---------- */
   html += `<div class="card ${c3}">
     <div class="card-head"><div class="card-head-left"><span class="badge ${p.l2_locked?'badge-navy':'badge-gray'}">L3</span><span class="card-title">Process steps</span></div>
     <span class="card-hint">verb first: "create...", "check..."</span></div>`;
-  if(!p.l2_locked){ html += `<div class="empty-note">Lock L2 first to add process steps.</div>`; }
+  if(!p.l2_locked){ html += `<div class="empty-note">Save L2 first to add process steps.</div>`; }
   else if(p.subprocesses.length===0){ html += `<div class="empty-note">No sub-processes yet — add one in L2 above.</div>`; }
   else if(!selSp){ html += `<div class="empty-note">Click a sub-process in L2 above to add its steps here.</div>`; }
   else {
@@ -1036,7 +1028,7 @@ function renderEditorLeftPanel(){
       });
       html += `<button class="link-btn" onclick="addStep('${selSp.id}')">+ add step</button>`;
       const hasAnyStep = selSp.steps.some(s=>s.text.trim());
-      html += `<button class="lock-btn" ${!hasAnyStep ? 'disabled':''} onclick="lockL3ForSp('${selSp.id}')">Lock L3 → classify &amp; select a step</button>`;
+      html += `<button class="lock-btn" ${!hasAnyStep ? 'disabled':''} onclick="lockL3ForSp('${selSp.id}')">Save L3 → classify &amp; select a step</button>`;
     } else {
       html += `<div class="empty-note" style="margin-bottom:8px;">Classify each step, then click one to work on its tasks in L4.</div>`;
       selSp.steps.forEach(st=>{
@@ -1058,7 +1050,7 @@ function renderEditorLeftPanel(){
           </div>
         </div>`;
       });
-      html += `<button class="lock-btn done-btn" onclick="unlockL3ForSp('${selSp.id}')">✓ Locked — click to edit steps</button>`;
+      html += `<button class="lock-btn done-btn" onclick="unlockL3ForSp('${selSp.id}')">✓ Saved — click to edit steps</button>`;
     }
   }
   html += `</div>`;
@@ -1067,7 +1059,7 @@ function renderEditorLeftPanel(){
   html += `<div class="card ${c4}">
     <div class="card-head"><div class="card-head-left"><span class="badge ${(selSp&&selSp.l3_locked)?'badge-navy':'badge-gray'}">L4</span><span class="card-title">Tasks (critical steps only)</span></div>
     <span class="card-hint">verb + object, e.g. "Enter customer ID"</span></div>`;
-  if(!selSp || !selSp.l3_locked){ html += `<div class="empty-note">Lock L3 for a sub-process first, then select a step.</div>`; }
+  if(!selSp || !selSp.l3_locked){ html += `<div class="empty-note">Save L3 for a sub-process first, then select a step.</div>`; }
   else if(!selStep){ html += `<div class="empty-note">Click a step in L3 above to work on its tasks here.</div>`; }
   else if(selStep.classification !== 'critical'){ html += `<div class="empty-note">"${escapeHtml(selStep.text)}" is standard — no tasks needed for this step.</div>`; }
   else {
@@ -1082,7 +1074,7 @@ function renderEditorLeftPanel(){
       });
       html += `<button class="link-btn" onclick="addTask('${selSp.id}','${selStep.id}')">+ add task</button>`;
       const hasAnyTask = selStep.tasks.some(t=>t.text.trim());
-      html += `<button class="lock-btn" ${!hasAnyTask ? 'disabled':''} onclick="lockL4ForStep('${selSp.id}','${selStep.id}')">Lock L4 → select a task for L5</button>`;
+      html += `<button class="lock-btn" ${!hasAnyTask ? 'disabled':''} onclick="lockL4ForStep('${selSp.id}','${selStep.id}')">Save L4 → select a task for L5</button>`;
     } else {
       html += `<div class="empty-note" style="margin-bottom:8px;">Click a task to work on its work instructions in L5.</div>`;
       selStep.tasks.forEach(task=>{
@@ -1093,7 +1085,7 @@ function renderEditorLeftPanel(){
           <span style="font-size:11px; font-weight:600; opacity:.85;">${isSel ? 'currently editing' : (hasWI ? '✓ has instructions' : 'needs instructions')}</span>
         </div>`;
       });
-      html += `<button class="lock-btn done-btn" onclick="unlockL4ForStep('${selSp.id}','${selStep.id}')">✓ Locked — click to edit tasks</button>`;
+      html += `<button class="lock-btn done-btn" onclick="unlockL4ForStep('${selSp.id}','${selStep.id}')">✓ Saved — click to edit tasks</button>`;
     }
   }
   html += `</div>`;
@@ -1103,7 +1095,7 @@ function renderEditorLeftPanel(){
     <div class="card-head"><div class="card-head-left"><span class="badge ${selTask?'badge-green':'badge-gray'}">L5</span><span class="card-title">Work instructions</span></div>
     <span class="card-hint">system-specific: transaction, field, tool</span></div>`;
   if(!selStep || selStep.classification!=='critical' || !selStep.l4_locked){
-    html += `<div class="empty-note">Lock L4 for a critical step first, then select a task.</div>`;
+    html += `<div class="empty-note">Save L4 for a critical step first, then select a task.</div>`;
   } else if(!selTask){
     html += `<div class="empty-note">Click a task in L4 above to add its work instructions here.</div>`;
   } else {
@@ -1164,7 +1156,7 @@ function updateEditorTree(){
     h += `</div>`;
   }
   const treeEl = document.getElementById('treeBody');
-  if(treeEl) treeEl.innerHTML = h.trim() ? h : `<div class="tree-empty">Choose L1 to get started.</div>`;
+  if(treeEl) treeEl.innerHTML = h.trim() ? h : `<div class="tree-empty">Nothing captured yet.</div>`;
 }
 
 init();
