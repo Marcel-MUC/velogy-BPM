@@ -25,9 +25,9 @@
   .header{ background:#fff; border:1px solid var(--gray-200); border-radius:14px; padding:18px 24px;
     display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:12px; }
   .brand{ display:flex; align-items:center; gap:14px; }
-  .logo{ width:42px; height:42px; border-radius:12px; background:#fff; border:1px solid var(--gray-200);
+  .logo{ width:42px; height:42px; border-radius:12px; background:#fff;
     display:flex; align-items:center; justify-content:center; flex-shrink:0; overflow:hidden; }
-  .logo img{ width:26px; height:26px; object-fit:contain; display:block; }
+  .logo img{ width:34px; height:34px; object-fit:contain; display:block; }
   .brand h1{ margin:0; font-size:17px; font-weight:800; color:var(--gray-900); letter-spacing:-.01em; }
   .brand p{ margin:1px 0 0; font-size:12.5px; color:var(--gray-500); }
   .actions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
@@ -1046,8 +1046,8 @@ function renderEditor(){
           </select>` : ''}
       </div>
       <div class="actions">
-        <button class="btn btn-ghost" onclick="backToCompanies()">← Back</button>
-        <button class="btn btn-dark" onclick="exportExcel(state.editorProcess.id)">⭳ Export</button>
+        <button class="btn btn-ghost" style="min-width:110px; text-align:center;" onclick="backToCompanies()">🏠 Home</button>
+        <button class="btn btn-dark" style="min-width:110px; text-align:center;" onclick="exportExcel(state.editorProcess.id)">⭳ Export</button>
       </div>
     </div>
     <div class="grid">
