@@ -155,22 +155,14 @@
   .inline-form{ display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
   .inline-form input,.inline-form select{ width:auto; flex:1; min-width:140px; }
 
-  .company-ms-wrap{ position:relative; z-index:1; min-width:180px; }
-  .company-ms-wrap.open{ z-index:50; }
-  .company-ms-btn{ position:relative; z-index:21; width:100%; min-height:36px; padding:6px 10px;
-    border:1px solid var(--gray-200); border-radius:8px; background:#fff; cursor:pointer;
-    display:flex; align-items:center; justify-content:space-between; gap:6px; font-family:inherit; }
-  .company-ms-chips{ display:flex; flex-wrap:wrap; gap:4px; flex:1; }
-  .chip{ background:var(--violet-light); color:var(--violet-dark); font-size:11.5px; font-weight:600;
-    padding:2px 8px; border-radius:999px; white-space:nowrap; }
-  .company-ms-caret{ color:var(--gray-500); font-size:11px; flex-shrink:0; }
-  .company-ms-panel{ position:absolute; top:calc(100% + 4px); left:0; z-index:21; min-width:220px;
-    max-height:220px; overflow-y:auto; background:#fff; border:1px solid var(--gray-200); border-radius:10px;
-    box-shadow:0 8px 20px rgba(20,15,50,.12); padding:6px; }
-  .company-ms-item{ display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:6px;
-    cursor:pointer; font-size:13px; white-space:nowrap; }
-  .company-ms-item:hover{ background:var(--gray-50); }
-  .company-ms-overlay{ position:fixed; inset:0; z-index:20; }
+  .access-company-row{ border-bottom:1px solid var(--gray-100); padding:10px 0; }
+  .access-company-row:last-child{ border-bottom:none; }
+  .access-company-header{ display:flex; align-items:center; gap:8px; font-weight:600; font-size:13.5px; cursor:pointer; }
+  .access-scope-radios{ display:flex; gap:16px; margin:8px 0 0 24px; font-size:12.5px; color:var(--gray-700); }
+  .access-scope-radios label{ display:flex; align-items:center; gap:5px; cursor:pointer; font-weight:500; }
+  .access-process-list{ margin:8px 0 0 24px; display:flex; flex-direction:column; gap:4px; max-height:140px;
+    overflow-y:auto; padding:8px; background:var(--gray-50); border-radius:8px; }
+  .access-process-item{ display:flex; align-items:center; gap:8px; font-size:12.5px; cursor:pointer; font-weight:500; }
 
   .modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:flex; align-items:center;
     justify-content:center; z-index:40; }
@@ -226,9 +218,10 @@ let state = {
   adminTab: 'pending',
   adminPending: [],
   adminUsers: [],
-  adminCompaniesList: [],
-  adminDraftCompanies: {},
-  companyMultiSelectOpenFor: null,
+  adminProfileCompanyRows: [],
+  adminUcapMap: {},
+  accessModalFor: null,
+  accessModalDraft: {},
   authError: ''
 };
 
@@ -374,7 +367,7 @@ async function doSignOut(){
     editorSelectedStepId:null,
     editorSelectedTaskId:null,
     adminTab:'pending', adminPending:[], adminUsers:[],
-    adminCompaniesList:[], adminDraftCompanies:{}, companyMultiSelectOpenFor:null, authError:'' };
+    adminProfileCompanyRows:[], adminUcapMap:{}, accessModalFor:null, accessModalDraft:{}, authError:'' };
   render();
 }
 async function doForgotPassword(email){
@@ -804,48 +797,24 @@ async function loadAdminData(){
   state.adminUsers = all || [];
   await loadDepartments();
 
-  const { data: companies } = await sb.from('companies').select('id, name').order('name');
-  state.adminCompaniesList = companies || [];
+  if(state.companies.length === 0) await loadCompanies();
 
-  const { data: pc } = await sb.from('profile_companies').select('profile_id, company_id');
-  const draft = {};
-  (pc || []).forEach(row=>{
-    if(!draft[row.profile_id]) draft[row.profile_id] = [];
-    draft[row.profile_id].push(row.company_id);
+  const { data: pcRows } = await sb.from('profile_companies').select('id, profile_id, company_id, level, scope');
+  state.adminProfileCompanyRows = pcRows || [];
+
+  const { data: ucapRows } = await sb.from('user_company_access_processes').select('user_company_access_id, process_id');
+  const ucapMap = {};
+  (ucapRows || []).forEach(row=>{
+    if(!ucapMap[row.user_company_access_id]) ucapMap[row.user_company_access_id] = [];
+    ucapMap[row.user_company_access_id].push(row.process_id);
   });
-  state.adminDraftCompanies = draft;
+  state.adminUcapMap = ucapMap;
 }
 function setAdminTab(tab){ state.adminTab = tab; render(); }
-function toggleCompanyMultiSelect(rowId){
-  state.companyMultiSelectOpenFor = (state.companyMultiSelectOpenFor === rowId) ? null : rowId;
-  render();
-}
-function closeCompanyMultiSelect(){
-  state.companyMultiSelectOpenFor = null;
-  render();
-}
-function toggleDraftCompany(rowId, companyId){
-  const cur = state.adminDraftCompanies[rowId] ? [...state.adminDraftCompanies[rowId]] : [];
-  const idx = cur.indexOf(companyId);
-  if(idx>-1) cur.splice(idx,1); else cur.push(companyId);
-  state.adminDraftCompanies[rowId] = cur;
-  render();
-}
-async function syncProfileCompanies(profileId, companyIds, role){
-  const level = (role === 'process_owner' || role === 'admin') ? 'edit' : 'view';
-  const { error: delError } = await sb.from('profile_companies').delete().eq('profile_id', profileId);
-  if(delError){ showError(delError.message); return false; }
-  if(companyIds.length === 0) return true;
-  const rows = companyIds.map(cid => ({ profile_id: profileId, company_id: cid, level }));
-  const { error: insError } = await sb.from('profile_companies').insert(rows);
-  if(insError){ showError(insError.message); return false; }
-  return true;
-}
 async function approveUser(id){
   const role = document.getElementById('role-'+id).value;
   const { error } = await sb.from('profiles').update({ role, status:'approved' }).eq('id', id);
   if(error){ showError(error.message); return; }
-  await syncProfileCompanies(id, state.adminDraftCompanies[id] || [], role);
   toast('User approved.');
   await loadAdminData(); render();
 }
@@ -860,8 +829,76 @@ async function updateUser(id){
   const status = document.getElementById('ustatus-'+id).value;
   const { error } = await sb.from('profiles').update({ role, status }).eq('id', id);
   if(error){ showError(error.message); return; }
-  await syncProfileCompanies(id, state.adminDraftCompanies[id] || [], role);
   toast('Saved.');
+  await loadAdminData(); render();
+}
+
+/* ---------- Permissions tab: per-user company/mega-cycle access ---------- */
+function openAccessModal(profileId){
+  const rows = state.adminProfileCompanyRows.filter(r=>r.profile_id===profileId);
+  const draft = {};
+  rows.forEach(r=>{
+    draft[r.company_id] = {
+      scope: r.scope,
+      processIds: r.scope==='specific' ? (state.adminUcapMap[r.id] || []).slice() : []
+    };
+  });
+  state.accessModalFor = profileId;
+  state.accessModalDraft = draft;
+  render();
+}
+function closeAccessModal(){
+  state.accessModalFor = null;
+  state.accessModalDraft = {};
+  render();
+}
+function toggleAccessCompany(companyId){
+  if(state.accessModalDraft[companyId]) delete state.accessModalDraft[companyId];
+  else state.accessModalDraft[companyId] = { scope:'all', processIds:[] };
+  render();
+}
+function setAccessScope(companyId, scope){
+  if(!state.accessModalDraft[companyId]) return;
+  state.accessModalDraft[companyId].scope = scope;
+  render();
+}
+function toggleAccessProcess(companyId, processId){
+  const entry = state.accessModalDraft[companyId];
+  if(!entry) return;
+  const idx = entry.processIds.indexOf(processId);
+  if(idx>-1) entry.processIds.splice(idx,1); else entry.processIds.push(processId);
+  render();
+}
+async function saveAccessModal(){
+  const profileId = state.accessModalFor;
+  const user = state.adminUsers.find(u=>u.id===profileId);
+  const level = (user && (user.role==='process_owner' || user.role==='admin')) ? 'edit' : 'view';
+  const draft = state.accessModalDraft;
+
+  const { error: delError } = await sb.from('profile_companies').delete().eq('profile_id', profileId);
+  if(delError){ showError(delError.message); return; }
+
+  const companyIds = Object.keys(draft);
+  if(companyIds.length > 0){
+    const rows = companyIds.map(cid => ({ profile_id: profileId, company_id: cid, level, scope: draft[cid].scope }));
+    const { data: inserted, error: insError } = await sb.from('profile_companies').insert(rows).select('id, company_id');
+    if(insError){ showError(insError.message); return; }
+
+    const ucapRows = [];
+    (inserted || []).forEach(row=>{
+      const entry = draft[row.company_id];
+      if(entry.scope === 'specific'){
+        entry.processIds.forEach(pid=> ucapRows.push({ user_company_access_id: row.id, process_id: pid }));
+      }
+    });
+    if(ucapRows.length > 0){
+      const { error: ucapError } = await sb.from('user_company_access_processes').insert(ucapRows);
+      if(ucapError){ showError(ucapError.message); return; }
+    }
+  }
+
+  toast('Access updated.');
+  closeAccessModal();
   await loadAdminData(); render();
 }
 
@@ -1081,48 +1118,26 @@ function renderAdmin(){
       <div class="tabs">
         <div class="tab ${state.adminTab==='pending'?'active':''}" onclick="setAdminTab('pending')">Pending requests (${state.adminPending.length})</div>
         <div class="tab ${state.adminTab==='users'?'active':''}" onclick="setAdminTab('users')">Users</div>
+        <div class="tab ${state.adminTab==='permissions'?'active':''}" onclick="setAdminTab('permissions')">Permissions</div>
         <div class="tab ${state.adminTab==='depts'?'active':''}" onclick="setAdminTab('depts')">Departments</div>
       </div>
       ${state.adminTab==='pending' ? renderAdminPending() : ''}
       ${state.adminTab==='users' ? renderAdminUsers() : ''}
+      ${state.adminTab==='permissions' ? renderAdminPermissions() : ''}
       ${state.adminTab==='depts' ? renderAdminDepts() : ''}
     </div>
-  </div>`;
-}
-function renderCompanyMultiSelect(rowId){
-  const selectedIds = state.adminDraftCompanies[rowId] || [];
-  const isOpen = state.companyMultiSelectOpenFor === rowId;
-  const chipsHtml = selectedIds.length
-    ? selectedIds.map(cid=>{
-        const c = state.adminCompaniesList.find(x=>x.id===cid);
-        return c ? `<span class="chip">${escapeHtml(c.name)}</span>` : '';
-      }).join('')
-    : `<span style="color:var(--gray-400); font-size:12.5px;">No companies assigned</span>`;
-  return `<div class="company-ms-wrap ${isOpen?'open':''}">
-    ${isOpen ? `<div class="company-ms-overlay" onclick="closeCompanyMultiSelect()"></div>` : ''}
-    <button type="button" class="company-ms-btn" onclick="toggleCompanyMultiSelect('${rowId}')">
-      <span class="company-ms-chips">${chipsHtml}</span>
-      <span class="company-ms-caret">▾</span>
-    </button>
-    ${isOpen ? `<div class="company-ms-panel">
-      ${state.adminCompaniesList.length===0 ? `<div style="padding:8px; color:var(--gray-500); font-size:12.5px;">No companies yet.</div>` : state.adminCompaniesList.map(c=>`
-        <label class="company-ms-item">
-          <input type="checkbox" ${selectedIds.includes(c.id)?'checked':''} onchange="toggleDraftCompany('${rowId}','${c.id}')">
-          ${escapeHtml(c.name)}
-        </label>`).join('')}
-    </div>` : ''}
-  </div>`;
+  </div>
+  ${state.accessModalFor ? renderAccessModal() : ''}`;
 }
 function renderAdminPending(){
   if(state.adminPending.length===0) return `<div class="empty-note">No pending requests.</div>`;
   return `<table class="admin-table"><thead><tr>
-    <th>Name</th><th>Email</th><th>Companies</th><th>Role</th><th></th>
+    <th>Name</th><th>Email</th><th>Role</th><th></th>
   </tr></thead><tbody>
   ${state.adminPending.map(u=>`
     <tr>
       <td>${escapeHtml(u.full_name || '—')}</td>
       <td>${escapeHtml(u.email || '')}</td>
-      <td>${renderCompanyMultiSelect(u.id)}</td>
       <td><select id="role-${u.id}"><option value="viewer">viewer</option><option value="process_owner">process_owner</option><option value="admin">admin</option></select></td>
       <td style="white-space:nowrap;">
         <button class="btn btn-primary" onclick="approveUser('${u.id}')">Approve</button>
@@ -1135,13 +1150,12 @@ function renderAdminPending(){
 function renderAdminUsers(){
   if(state.adminUsers.length===0) return `<div class="empty-note">No users yet.</div>`;
   return `<table class="admin-table"><thead><tr>
-    <th>Name</th><th>Email</th><th>Companies</th><th>Role</th><th>Status</th><th></th>
+    <th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th>
   </tr></thead><tbody>
   ${state.adminUsers.map(u=>`
     <tr>
       <td>${escapeHtml(u.full_name || '—')}</td>
       <td>${escapeHtml(u.email || '')}</td>
-      <td>${renderCompanyMultiSelect(u.id)}</td>
       <td><select id="urole-${u.id}">
         <option value="viewer" ${u.role==='viewer'?'selected':''}>viewer</option>
         <option value="process_owner" ${u.role==='process_owner'?'selected':''}>process_owner</option>
@@ -1155,6 +1169,69 @@ function renderAdminUsers(){
     </tr>
   `).join('')}
   </tbody></table>`;
+}
+function renderAccessSummary(profileId){
+  const rows = state.adminProfileCompanyRows.filter(r=>r.profile_id===profileId);
+  if(rows.length===0) return `<span style="color:var(--gray-400); font-size:12.5px;">No companies assigned</span>`;
+  const names = rows.map(r=>{
+    const c = state.companies.find(x=>x.id===r.company_id);
+    return c ? c.name : null;
+  }).filter(Boolean);
+  if(names.length <= 2) return escapeHtml(names.join(', '));
+  return `${rows.length} companies`;
+}
+function renderAdminPermissions(){
+  if(state.adminUsers.length===0) return `<div class="empty-note">No users yet.</div>`;
+  return `<table class="admin-table"><thead><tr>
+    <th>Name</th><th>Email</th><th>Access</th><th></th>
+  </tr></thead><tbody>
+  ${state.adminUsers.map(u=>`
+    <tr>
+      <td>${escapeHtml(u.full_name || '—')}</td>
+      <td>${escapeHtml(u.email || '')}</td>
+      <td>${renderAccessSummary(u.id)}</td>
+      <td><button class="btn btn-primary" onclick="openAccessModal('${u.id}')">Manage access</button></td>
+    </tr>
+  `).join('')}
+  </tbody></table>`;
+}
+function renderAccessModal(){
+  const user = state.adminUsers.find(u=>u.id===state.accessModalFor);
+  if(!user) return '';
+  const draft = state.accessModalDraft;
+  return `<div class="modal-overlay blur" onclick="if(event.target===this) closeAccessModal()">
+    <div class="modal" style="width:480px; max-height:80vh; overflow-y:auto;">
+      <h3>Manage access — ${escapeHtml(user.full_name || user.email || '')}</h3>
+      ${state.companies.length===0 ? `<div class="empty-note">No companies yet.</div>` : state.companies.map(c=>{
+        const entry = draft[c.id];
+        const checked = !!entry;
+        return `<div class="access-company-row">
+          <label class="access-company-header">
+            <input type="checkbox" ${checked?'checked':''} onchange="toggleAccessCompany('${c.id}')">
+            <span>${escapeHtml(c.name)}</span>
+          </label>
+          ${checked ? `
+            <div class="access-scope-radios">
+              <label><input type="radio" name="access-scope-${c.id}" ${entry.scope==='all'?'checked':''} onchange="setAccessScope('${c.id}','all')"> All mega-cycles</label>
+              <label><input type="radio" name="access-scope-${c.id}" ${entry.scope==='specific'?'checked':''} onchange="setAccessScope('${c.id}','specific')"> Specific</label>
+            </div>
+            ${entry.scope==='specific' ? `
+              <div class="access-process-list">
+                ${(c.processes||[]).length===0 ? `<div class="empty-note" style="padding:0;">No mega-cycles yet for this company.</div>` : c.processes.map(p=>`
+                  <label class="access-process-item">
+                    <input type="checkbox" ${entry.processIds.includes(p.id)?'checked':''} onchange="toggleAccessProcess('${c.id}','${p.id}')">
+                    <span>${escapeHtml(p.l1_name)}</span>
+                  </label>`).join('')}
+              </div>` : ''}
+          ` : ''}
+        </div>`;
+      }).join('')}
+      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; padding-top:14px; border-top:1px solid var(--gray-200);">
+        <button class="btn btn-ghost" onclick="closeAccessModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveAccessModal()">Save</button>
+      </div>
+    </div>
+  </div>`;
 }
 function renderAdminDepts(){
   return `<div class="inline-form">
