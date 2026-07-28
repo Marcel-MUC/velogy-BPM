@@ -458,26 +458,49 @@ function refreshSaveButton(btnId, enabled){
   const btn = document.getElementById(btnId);
   if(btn) btn.disabled = !enabled;
 }
+function reportSaveResult(error, data){
+  if(error){
+    console.error('Debounced save failed:', error);
+    toast('Save failed: ' + error.message);
+    return;
+  }
+  if(!data || data.length===0){
+    console.warn('Debounced save affected 0 rows — check RLS policies.', data);
+    toast('Save did not apply — check permissions.');
+  }
+}
 function onSubName(spId, v){
   findSp(spId).name = v; updateEditorTree();
   refreshSaveButton('l2-save-btn', state.editorProcess.subprocesses.some(s=>s.name.trim()));
-  debounced('sp-'+spId, ()=> sb.from('subprocesses').update({ name:v }).eq('id', spId));
+  debounced('sp-'+spId, async ()=>{
+    const { data, error } = await sb.from('subprocesses').update({ name:v }).eq('id', spId).select();
+    reportSaveResult(error, data);
+  });
 }
 function onStepText(spId, stepId, v){
   findStep(spId, stepId).text = v; updateEditorTree();
   refreshSaveButton('l3-save-btn', findSp(spId).steps.some(s=>s.text.trim()));
-  debounced('step-'+stepId, ()=> sb.from('steps').update({ text:v }).eq('id', stepId));
+  debounced('step-'+stepId, async ()=>{
+    const { data, error } = await sb.from('steps').update({ text:v }).eq('id', stepId).select();
+    reportSaveResult(error, data);
+  });
 }
 function onTaskText(spId, stepId, taskId, v){
   findTask(spId, stepId, taskId).text = v; updateEditorTree();
   refreshSaveButton('l4-save-btn', findStep(spId, stepId).tasks.some(t=>t.text.trim()));
-  debounced('task-'+taskId, ()=> sb.from('tasks').update({ text:v }).eq('id', taskId));
+  debounced('task-'+taskId, async ()=>{
+    const { data, error } = await sb.from('tasks').update({ text:v }).eq('id', taskId).select();
+    reportSaveResult(error, data);
+  });
 }
 function onWI(spId, stepId, taskId, wiId, field, v){
   const wi = findTask(spId, stepId, taskId).work_instructions.find(w=>w.id===wiId);
   wi[field] = v; updateEditorTree();
   refreshSaveButton('l5-save-btn', findTask(spId, stepId, taskId).work_instructions.some(w=>w.transaction.trim()||w.field.trim()||w.tool.trim()));
-  debounced('wi-'+wiId+'-'+field, ()=> sb.from('work_instructions').update({ [field]:v }).eq('id', wiId));
+  debounced('wi-'+wiId+'-'+field, async ()=>{
+    const { data, error } = await sb.from('work_instructions').update({ [field]:v }).eq('id', wiId).select();
+    reportSaveResult(error, data);
+  });
 }
 
 /* --- structural actions (await db, then re-render) --- */
