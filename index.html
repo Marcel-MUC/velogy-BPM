@@ -219,6 +219,7 @@ let state = {
   adminUsers: [],
   adminProfileCompanyRows: [],
   adminUcapMap: {},
+  adminAuditLog: [],
   accessModalFor: null,
   accessModalDraft: {},
   authError: ''
@@ -366,7 +367,7 @@ async function doSignOut(){
     editorSelectedStepId:null,
     editorSelectedTaskId:null,
     adminTab:'pending', adminPending:[], adminUsers:[],
-    adminProfileCompanyRows:[], adminUcapMap:{}, accessModalFor:null, accessModalDraft:{}, authError:'' };
+    adminProfileCompanyRows:[], adminUcapMap:{}, adminAuditLog:[], accessModalFor:null, accessModalDraft:{}, authError:'' };
   render();
 }
 async function doForgotPassword(email){
@@ -808,26 +809,51 @@ async function loadAdminData(){
     ucapMap[row.user_company_access_id].push(row.process_id);
   });
   state.adminUcapMap = ucapMap;
+
+  const { data: auditRows } = await sb.from('audit_log')
+    .select('id, actor_id, target_id, action, old_value, new_value, created_at')
+    .order('created_at', { ascending:false })
+    .limit(200);
+  state.adminAuditLog = auditRows || [];
+}
+function findProfileLabel(profileId){
+  const u = state.adminUsers.find(x=>x.id===profileId) || state.adminPending.find(x=>x.id===profileId);
+  return u ? (u.full_name || u.email || profileId) : profileId;
+}
+async function logAudit(targetId, action, oldValue, newValue){
+  await sb.from('audit_log').insert({
+    actor_id: state.profile.id, target_id: targetId, action,
+    old_value: oldValue==null ? null : String(oldValue),
+    new_value: newValue==null ? null : String(newValue)
+  });
 }
 function setAdminTab(tab){ state.adminTab = tab; render(); }
 async function approveUser(id){
   const role = document.getElementById('role-'+id).value;
+  const before = state.adminPending.find(u=>u.id===id);
   const { error } = await sb.from('profiles').update({ role, status:'approved' }).eq('id', id);
   if(error){ showError(error.message); return; }
+  await logAudit(id, 'status_changed', before ? before.status : 'pending', 'approved');
+  await logAudit(id, 'role_changed', before && before.role ? before.role : null, role);
   toast('User approved.');
   await loadAdminData(); render();
 }
 async function rejectUser(id){
+  const before = state.adminPending.find(u=>u.id===id);
   const { error } = await sb.from('profiles').update({ status:'rejected' }).eq('id', id);
   if(error){ showError(error.message); return; }
+  await logAudit(id, 'status_changed', before ? before.status : 'pending', 'rejected');
   toast('Request rejected.');
   await loadAdminData(); render();
 }
 async function updateUser(id){
   const role = document.getElementById('urole-'+id).value;
   const status = document.getElementById('ustatus-'+id).value;
+  const before = state.adminUsers.find(u=>u.id===id);
   const { error } = await sb.from('profiles').update({ role, status }).eq('id', id);
   if(error){ showError(error.message); return; }
+  if(before && before.role !== role) await logAudit(id, 'role_changed', before.role, role);
+  if(before && before.status !== status) await logAudit(id, 'status_changed', before.status, status);
   toast('Saved.');
   await loadAdminData(); render();
 }
@@ -874,9 +900,30 @@ function toggleAccessProcess(companyId, processId){
   if(idx>-1) entry.processIds.splice(idx,1); else entry.processIds.push(processId);
   render();
 }
+function summarizeAccessEntry(companyId, entry){
+  if(!entry) return null;
+  const c = state.companies.find(x=>x.id===companyId);
+  const companyName = c ? c.name : companyId;
+  const levelLabel = entry.level === 'edit' ? 'Editor' : 'Viewer';
+  let scopeLabel;
+  if(entry.scope === 'specific'){
+    const names = (entry.processIds||[]).map(pid=>{
+      const p = c && c.processes ? c.processes.find(x=>x.id===pid) : null;
+      return p ? p.l1_name : pid;
+    });
+    scopeLabel = names.length ? `Specific (${names.join(', ')})` : 'Specific (none selected)';
+  } else {
+    scopeLabel = 'All mega-cycles';
+  }
+  return `${companyName}: ${levelLabel} / ${scopeLabel}`;
+}
 async function saveAccessModal(){
   const profileId = state.accessModalFor;
   const draft = state.accessModalDraft;
+  const beforeMap = {};
+  state.adminProfileCompanyRows.filter(r=>r.profile_id===profileId).forEach(r=>{
+    beforeMap[r.company_id] = { level:r.level, scope:r.scope, processIds: r.scope==='specific' ? (state.adminUcapMap[r.id]||[]) : [] };
+  });
 
   const { error: delError } = await sb.from('profile_companies').delete().eq('profile_id', profileId);
   if(delError){ showError(delError.message); return; }
@@ -897,6 +944,21 @@ async function saveAccessModal(){
     if(ucapRows.length > 0){
       const { error: ucapError } = await sb.from('user_company_access_processes').insert(ucapRows);
       if(ucapError){ showError(ucapError.message); return; }
+    }
+  }
+
+  const allCompanyIds = new Set([...Object.keys(beforeMap), ...companyIds]);
+  for(const cid of allCompanyIds){
+    const b = beforeMap[cid];
+    const a = draft[cid];
+    if(b && !a){
+      await logAudit(profileId, 'company_access_revoked', summarizeAccessEntry(cid, b), null);
+    } else if(!b && a){
+      await logAudit(profileId, 'company_access_granted', null, summarizeAccessEntry(cid, a));
+    } else if(b && a){
+      const changed = b.level!==a.level || b.scope!==a.scope ||
+        JSON.stringify([...b.processIds].sort()) !== JSON.stringify([...a.processIds].sort());
+      if(changed) await logAudit(profileId, 'company_access_granted', summarizeAccessEntry(cid, b), summarizeAccessEntry(cid, a));
     }
   }
 
@@ -1123,11 +1185,13 @@ function renderAdmin(){
         <div class="tab ${state.adminTab==='pending'?'active':''}" onclick="setAdminTab('pending')">Pending requests (${state.adminPending.length})</div>
         <div class="tab ${state.adminTab==='users'?'active':''}" onclick="setAdminTab('users')">Users</div>
         <div class="tab ${state.adminTab==='permissions'?'active':''}" onclick="setAdminTab('permissions')">Permissions</div>
+        <div class="tab ${state.adminTab==='audit'?'active':''}" onclick="setAdminTab('audit')">Audit Log</div>
         <div class="tab ${state.adminTab==='depts'?'active':''}" onclick="setAdminTab('depts')">Departments</div>
       </div>
       ${state.adminTab==='pending' ? renderAdminPending() : ''}
       ${state.adminTab==='users' ? renderAdminUsers() : ''}
       ${state.adminTab==='permissions' ? renderAdminPermissions() : ''}
+      ${state.adminTab==='audit' ? renderAdminAuditLog() : ''}
       ${state.adminTab==='depts' ? renderAdminDepts() : ''}
     </div>
   </div>
@@ -1156,7 +1220,14 @@ function renderAdminUsers(){
   return `<table class="admin-table"><thead><tr>
     <th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th>
   </tr></thead><tbody>
-  ${state.adminUsers.map(u=>`
+  ${state.adminUsers.map(u=> u.is_protected ? `
+    <tr>
+      <td>${escapeHtml(u.full_name || '—')}</td>
+      <td>${escapeHtml(u.email || '')}</td>
+      <td colspan="2" style="color:var(--gray-500); font-style:italic;">Protected admin</td>
+      <td></td>
+    </tr>
+  ` : `
     <tr>
       <td>${escapeHtml(u.full_name || '—')}</td>
       <td>${escapeHtml(u.email || '')}</td>
@@ -1250,6 +1321,28 @@ function renderAccessModal(){
       </div>
     </div>
   </div>`;
+}
+function renderAdminAuditLog(){
+  if(state.adminAuditLog.length===0) return `<div class="empty-note">No audit entries yet.</div>`;
+  const actionLabels = {
+    role_changed: 'Role changed',
+    status_changed: 'Status changed',
+    company_access_granted: 'Access granted/changed',
+    company_access_revoked: 'Access revoked'
+  };
+  return `<table class="admin-table"><thead><tr>
+    <th>When</th><th>Actor</th><th>Target</th><th>Action</th><th>Change</th>
+  </tr></thead><tbody>
+  ${state.adminAuditLog.map(row=>`
+    <tr>
+      <td style="white-space:nowrap; font-size:12px; color:var(--gray-500);">${escapeHtml(new Date(row.created_at).toLocaleString())}</td>
+      <td>${escapeHtml(findProfileLabel(row.actor_id))}</td>
+      <td>${escapeHtml(findProfileLabel(row.target_id))}</td>
+      <td>${escapeHtml(actionLabels[row.action] || row.action)}</td>
+      <td style="font-size:12px;">${escapeHtml(row.old_value || '—')} → ${escapeHtml(row.new_value || '—')}</td>
+    </tr>
+  `).join('')}
+  </tbody></table>`;
 }
 function renderAdminDepts(){
   return `<div class="inline-form">
