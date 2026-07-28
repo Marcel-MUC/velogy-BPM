@@ -1037,7 +1037,7 @@ function renderCompanyMultiSelect(rowId){
         const c = state.adminCompaniesList.find(x=>x.id===cid);
         return c ? `<span class="chip">${escapeHtml(c.name)}</span>` : '';
       }).join('')
-    : `<span style="color:var(--gray-400); font-size:12.5px;">No companies</span>`;
+    : `<span style="color:var(--gray-400); font-size:12.5px;">No companies assigned</span>`;
   return `<div class="company-ms-wrap">
     ${isOpen ? `<div class="company-ms-overlay" onclick="closeCompanyMultiSelect()"></div>` : ''}
     <button type="button" class="company-ms-btn" onclick="toggleCompanyMultiSelect('${rowId}')">
