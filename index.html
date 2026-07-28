@@ -101,7 +101,6 @@
   .sp-row.sel{ background:var(--navy); border-color:var(--navy); color:#fff; }
   .row-pill{ font-size:12px; font-weight:600; padding:3px 10px; border-radius:999px; white-space:nowrap; }
   .row-pill.active{ background:rgba(255,255,255,.18); color:#fff; }
-  .row-pill.complete{ background:var(--green-bg); color:var(--green); }
   .row-pill.todo{ background:none; color:var(--gray-500); font-weight:500; padding:3px 0; }
   .row-chevron{ font-size:16px; color:var(--gray-400); flex-shrink:0; }
   .sp-row.sel .row-chevron{ color:rgba(255,255,255,.6); }
@@ -1070,9 +1069,9 @@ function renderSavedRow(unlockCall){
   </div>`;
 }
 
-function rowStatusHtml(isSel, hasChildren){
-  const pillClass = isSel ? 'active' : (hasChildren ? 'complete' : 'todo');
-  const label = isSel ? 'Currently editing' : (hasChildren ? '✓ Complete' : 'Click to edit');
+function rowStatusHtml(isSel){
+  const pillClass = isSel ? 'active' : 'todo';
+  const label = isSel ? 'Currently editing' : 'Click to edit';
   return `<div style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
     <span class="row-pill ${pillClass}">${label}</span>
     <span class="row-chevron">›</span>
@@ -1108,10 +1107,9 @@ function renderEditorLeftPanel(){
     html += `<div class="card-desc" style="opacity:.5;">Click a sub-process to work on it in L3. Click it again to switch to another one.</div>`;
     p.subprocesses.forEach(sp=>{
       const isSel = sp.id === state.editorSelectedSpId;
-      const hasSteps = sp.steps.some(s=>s.text.trim());
       html += `<div class="sp-row ${isSel?'sel':''}" onclick="toggleSpSelection('${sp.id}')">
         <span>${escapeHtml(sp.name || '(untitled)')}</span>
-        ${rowStatusHtml(isSel, hasSteps)}
+        ${rowStatusHtml(isSel)}
       </div>`;
     });
   }
@@ -1144,10 +1142,9 @@ function renderEditorLeftPanel(){
       html += `<div class="card-desc" style="opacity:.5;">Click a step to work on its tasks in L4.</div>`;
       selSp.steps.forEach(st=>{
         const isSel = st.id === state.editorSelectedStepId;
-        const hasTasks = st.tasks.some(t=>t.text.trim());
         html += `<div class="sp-row ${isSel?'sel':''}" onclick="toggleStepSelection('${st.id}')">
           <span>${escapeHtml(st.text)}</span>
-          ${rowStatusHtml(isSel, hasTasks)}
+          ${rowStatusHtml(isSel)}
         </div>`;
       });
       html += renderSavedRow(`unlockL3ForSp('${selSp.id}')`);
@@ -1178,10 +1175,9 @@ function renderEditorLeftPanel(){
       html += `<div class="card-desc" style="opacity:.5;">Click a task to work on its work instructions in L5.</div>`;
       selStep.tasks.forEach(task=>{
         const isSel = task.id === state.editorSelectedTaskId;
-        const hasWI = task.work_instructions.some(wi=>wi.transaction.trim()||wi.field.trim()||wi.tool.trim());
         html += `<div class="sp-row ${isSel?'sel':''}" onclick="toggleTaskSelection('${task.id}')">
           <span>${escapeHtml(task.text)}</span>
-          ${rowStatusHtml(isSel, hasWI)}
+          ${rowStatusHtml(isSel)}
         </div>`;
       });
       html += renderSavedRow(`unlockL4ForStep('${selSp.id}','${selStep.id}')`);
