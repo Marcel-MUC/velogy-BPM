@@ -108,13 +108,11 @@
   .stat .n{ font-size:22px; font-weight:800; margin-top:2px; }
   .tree-process{ margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid var(--gray-200); }
   .tree-process:last-child{ border-bottom:none; }
-  .tree-l1{ font-weight:700; color:var(--violet); font-size:15px; margin-bottom:6px; }
-  .tree-l2{ font-weight:700; font-size:13.5px; margin:6px 0 2px 10px; }
+  .tree-l1{ font-weight:700; color:var(--gray-900); font-size:15px; margin-bottom:6px; }
+  .tree-l2{ font-weight:700; font-size:13.5px; color:var(--gray-900); margin:6px 0 2px 10px; }
   .tree-l3{ font-size:12.5px; color:var(--gray-700); margin:2px 0 2px 26px; }
   .tree-l4{ font-size:12px; color:var(--gray-500); margin:2px 0 2px 42px; }
-  .tree-l4::before{ content:"→ "; }
-  .tree-l5{ font-size:11.5px; color:var(--violet-dark); margin:2px 0 2px 58px; font-family:ui-monospace,Menlo,monospace; }
-  .tree-l5::before{ content:"· "; }
+  .tree-l5{ font-size:11.5px; color:var(--gray-400); margin:2px 0 2px 58px; }
   .tree-empty{ text-align:center; color:var(--gray-400); font-size:13.5px; padding:40px 10px; line-height:1.7; }
 
   .dash-list{ display:flex; flex-direction:column; gap:10px; }
@@ -1034,8 +1032,8 @@ function renderEditor(){
     <div class="grid">
       <div id="editorLeft"></div>
       <div class="card" style="position:sticky; top:20px;">
-        <div class="card-title" style="font-size:16px; margin-bottom:2px;">Process tree — live preview</div>
-        <div class="card-hint" style="margin-bottom:0;">This view updates live as you fill things in.</div>
+        <div class="card-title" style="font-size:16px; margin-bottom:2px;">Process tree</div>
+        <div class="card-hint" style="margin-bottom:0;">Live preview</div>
         <div class="stats" id="stats"></div>
         <div id="treeBody"></div>
       </div>
