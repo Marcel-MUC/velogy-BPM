@@ -622,7 +622,14 @@ async function unlockL5ForTask(spId, stepId, taskId){
 }
 
 /* ================= EXCEL EXPORT ================= */
-async function exportExcel(processIdOnly){
+function formatExportTimestamp(d){
+  const pad = n => String(n).padStart(2,'0');
+  return `${pad(d.getFullYear()%100)}-${pad(d.getMonth()+1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
+}
+function sanitizeFilenamePart(s){
+  return String(s||'').trim().replace(/\s+/g,'_').replace(/[^A-Za-z0-9_-]/g,'');
+}
+async function exportExcel(processIdOnly, companyIdOnly){
   let query = sb.from('processes').select(`
       l1_name, companies(name), departments(name),
       subprocesses ( name, position,
@@ -634,6 +641,7 @@ async function exportExcel(processIdOnly){
       )
     `);
   if(processIdOnly) query = query.eq('id', processIdOnly);
+  else if(companyIdOnly) query = query.eq('company_id', companyIdOnly);
   const { data, error } = await query;
   if(error){ toast(error.message); return; }
   const rows = [];
@@ -668,7 +676,19 @@ async function exportExcel(processIdOnly){
   ws['!cols'] = [{wch:16},{wch:16},{wch:20},{wch:20},{wch:26},{wch:26},{wch:16},{wch:16},{wch:16}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Process Capture");
-  XLSX.writeFile(wb, "Velogy_Process_Capture.xlsx");
+
+  const ts = formatExportTimestamp(new Date());
+  let filename = `Export_All_${ts}.xlsx`;
+  if(processIdOnly){
+    const company = sanitizeFilenamePart(data[0]?.companies?.name);
+    const megaCycle = sanitizeFilenamePart(data[0]?.l1_name);
+    if(company && megaCycle) filename = `Export_${company}_${megaCycle}_${ts}.xlsx`;
+  } else if(companyIdOnly){
+    const company = sanitizeFilenamePart(data[0]?.companies?.name);
+    if(company) filename = `Export_${company}_${ts}.xlsx`;
+  }
+
+  XLSX.writeFile(wb, filename);
   toast('Exported.');
 }
 
@@ -844,6 +864,7 @@ function renderCompanyList(){
             <h3 style="margin:0;">${escapeHtml(c.name)}</h3>
             <div class="actions" onclick="event.stopPropagation()">
               <span style="font-size:12px; color:var(--gray-500);">${c.processes.length} mega-cycle${c.processes.length===1?'':'s'}</span>
+              <button class="btn btn-ghost" onclick="exportExcel(null, '${c.id}')">⭳ Export</button>
               ${state.profile.role==='admin' ? `<button class="btn btn-ghost" onclick="openCompanySettings('${c.id}')">⋯</button>` : ''}
             </div>
           </div>
