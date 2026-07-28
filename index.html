@@ -155,6 +155,22 @@
   .inline-form{ display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
   .inline-form input,.inline-form select{ width:auto; flex:1; min-width:140px; }
 
+  .company-ms-wrap{ position:relative; min-width:180px; }
+  .company-ms-btn{ position:relative; z-index:21; width:100%; min-height:36px; padding:6px 10px;
+    border:1px solid var(--gray-200); border-radius:8px; background:#fff; cursor:pointer;
+    display:flex; align-items:center; justify-content:space-between; gap:6px; font-family:inherit; }
+  .company-ms-chips{ display:flex; flex-wrap:wrap; gap:4px; flex:1; }
+  .chip{ background:var(--violet-light); color:var(--violet-dark); font-size:11.5px; font-weight:600;
+    padding:2px 8px; border-radius:999px; white-space:nowrap; }
+  .company-ms-caret{ color:var(--gray-500); font-size:11px; flex-shrink:0; }
+  .company-ms-panel{ position:absolute; top:calc(100% + 4px); left:0; z-index:21; min-width:220px;
+    max-height:220px; overflow-y:auto; background:#fff; border:1px solid var(--gray-200); border-radius:10px;
+    box-shadow:0 8px 20px rgba(20,15,50,.12); padding:6px; }
+  .company-ms-item{ display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:6px;
+    cursor:pointer; font-size:13px; white-space:nowrap; }
+  .company-ms-item:hover{ background:var(--gray-50); }
+  .company-ms-overlay{ position:fixed; inset:0; z-index:20; }
+
   .modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:flex; align-items:center;
     justify-content:center; z-index:40; }
   .modal{ background:#fff; border-radius:14px; padding:24px; width:380px; max-width:92vw; }
@@ -198,6 +214,9 @@ let state = {
   adminTab: 'pending',
   adminPending: [],
   adminUsers: [],
+  adminCompaniesList: [],
+  adminDraftCompanies: {},
+  companyMultiSelectOpenFor: null,
   authError: ''
 };
 
@@ -302,7 +321,8 @@ async function doSignOut(){
     editorSelectedSpId:null,
     editorSelectedStepId:null,
     editorSelectedTaskId:null,
-    adminTab:'pending', adminPending:[], adminUsers:[], authError:'' };
+    adminTab:'pending', adminPending:[], adminUsers:[],
+    adminCompaniesList:[], adminDraftCompanies:{}, companyMultiSelectOpenFor:null, authError:'' };
   render();
 }
 async function doForgotPassword(email){
@@ -728,17 +748,51 @@ async function openAdmin(){
 async function loadAdminData(){
   const { data: pending } = await sb.from('profiles').select('*').eq('status','pending').order('requested_at');
   state.adminPending = pending || [];
-  const { data: all } = await sb.from('profiles').select('*, departments(name)').neq('status','pending').order('full_name');
+  const { data: all } = await sb.from('profiles').select('*').neq('status','pending').order('full_name');
   state.adminUsers = all || [];
   await loadDepartments();
+
+  const { data: companies } = await sb.from('companies').select('id, name').order('name');
+  state.adminCompaniesList = companies || [];
+
+  const { data: pc } = await sb.from('profile_companies').select('profile_id, company_id');
+  const draft = {};
+  (pc || []).forEach(row=>{
+    if(!draft[row.profile_id]) draft[row.profile_id] = [];
+    draft[row.profile_id].push(row.company_id);
+  });
+  state.adminDraftCompanies = draft;
 }
 function setAdminTab(tab){ state.adminTab = tab; render(); }
+function toggleCompanyMultiSelect(rowId){
+  state.companyMultiSelectOpenFor = (state.companyMultiSelectOpenFor === rowId) ? null : rowId;
+  render();
+}
+function closeCompanyMultiSelect(){
+  state.companyMultiSelectOpenFor = null;
+  render();
+}
+function toggleDraftCompany(rowId, companyId){
+  const cur = state.adminDraftCompanies[rowId] ? [...state.adminDraftCompanies[rowId]] : [];
+  const idx = cur.indexOf(companyId);
+  if(idx>-1) cur.splice(idx,1); else cur.push(companyId);
+  state.adminDraftCompanies[rowId] = cur;
+  render();
+}
+async function syncProfileCompanies(profileId, companyIds){
+  const { error: delError } = await sb.from('profile_companies').delete().eq('profile_id', profileId);
+  if(delError){ toast(delError.message); return false; }
+  if(companyIds.length === 0) return true;
+  const rows = companyIds.map(cid => ({ profile_id: profileId, company_id: cid }));
+  const { error: insError } = await sb.from('profile_companies').insert(rows);
+  if(insError){ toast(insError.message); return false; }
+  return true;
+}
 async function approveUser(id){
-  const dept = document.getElementById('dept-'+id).value;
   const role = document.getElementById('role-'+id).value;
-  if(!dept){ toast('Please choose a department.'); return; }
-  const { error } = await sb.from('profiles').update({ department_id: dept, role, status:'approved' }).eq('id', id);
+  const { error } = await sb.from('profiles').update({ role, status:'approved' }).eq('id', id);
   if(error){ toast(error.message); return; }
+  await syncProfileCompanies(id, state.adminDraftCompanies[id] || []);
   toast('User approved.');
   await loadAdminData(); render();
 }
@@ -749,11 +803,11 @@ async function rejectUser(id){
   await loadAdminData(); render();
 }
 async function updateUser(id){
-  const dept = document.getElementById('udept-'+id).value;
   const role = document.getElementById('urole-'+id).value;
   const status = document.getElementById('ustatus-'+id).value;
-  const { error } = await sb.from('profiles').update({ department_id: dept, role, status }).eq('id', id);
+  const { error } = await sb.from('profiles').update({ role, status }).eq('id', id);
   if(error){ toast(error.message); return; }
+  await syncProfileCompanies(id, state.adminDraftCompanies[id] || []);
   toast('Saved.');
   await loadAdminData(); render();
 }
@@ -975,16 +1029,40 @@ function renderAdmin(){
     </div>
   </div>`;
 }
+function renderCompanyMultiSelect(rowId){
+  const selectedIds = state.adminDraftCompanies[rowId] || [];
+  const isOpen = state.companyMultiSelectOpenFor === rowId;
+  const chipsHtml = selectedIds.length
+    ? selectedIds.map(cid=>{
+        const c = state.adminCompaniesList.find(x=>x.id===cid);
+        return c ? `<span class="chip">${escapeHtml(c.name)}</span>` : '';
+      }).join('')
+    : `<span style="color:var(--gray-400); font-size:12.5px;">No companies</span>`;
+  return `<div class="company-ms-wrap">
+    ${isOpen ? `<div class="company-ms-overlay" onclick="closeCompanyMultiSelect()"></div>` : ''}
+    <button type="button" class="company-ms-btn" onclick="toggleCompanyMultiSelect('${rowId}')">
+      <span class="company-ms-chips">${chipsHtml}</span>
+      <span class="company-ms-caret">▾</span>
+    </button>
+    ${isOpen ? `<div class="company-ms-panel">
+      ${state.adminCompaniesList.length===0 ? `<div style="padding:8px; color:var(--gray-500); font-size:12.5px;">No companies yet.</div>` : state.adminCompaniesList.map(c=>`
+        <label class="company-ms-item">
+          <input type="checkbox" ${selectedIds.includes(c.id)?'checked':''} onchange="toggleDraftCompany('${rowId}','${c.id}')">
+          ${escapeHtml(c.name)}
+        </label>`).join('')}
+    </div>` : ''}
+  </div>`;
+}
 function renderAdminPending(){
   if(state.adminPending.length===0) return `<div class="empty-note">No pending requests.</div>`;
   return `<table class="admin-table"><thead><tr>
-    <th>Name</th><th>Email</th><th>Department</th><th>Role</th><th></th>
+    <th>Name</th><th>Email</th><th>Companies</th><th>Role</th><th></th>
   </tr></thead><tbody>
   ${state.adminPending.map(u=>`
     <tr>
       <td>${escapeHtml(u.full_name || '—')}</td>
       <td>${escapeHtml(u.email || '')}</td>
-      <td><select id="dept-${u.id}"><option value="">— choose —</option>${state.departments.map(d=>`<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('')}</select></td>
+      <td>${renderCompanyMultiSelect(u.id)}</td>
       <td><select id="role-${u.id}"><option value="viewer">viewer</option><option value="process_owner">process_owner</option><option value="admin">admin</option></select></td>
       <td style="white-space:nowrap;">
         <button class="btn btn-primary" onclick="approveUser('${u.id}')">Approve</button>
@@ -997,13 +1075,13 @@ function renderAdminPending(){
 function renderAdminUsers(){
   if(state.adminUsers.length===0) return `<div class="empty-note">No users yet.</div>`;
   return `<table class="admin-table"><thead><tr>
-    <th>Name</th><th>Email</th><th>Department</th><th>Role</th><th>Status</th><th></th>
+    <th>Name</th><th>Email</th><th>Companies</th><th>Role</th><th>Status</th><th></th>
   </tr></thead><tbody>
   ${state.adminUsers.map(u=>`
     <tr>
       <td>${escapeHtml(u.full_name || '—')}</td>
       <td>${escapeHtml(u.email || '')}</td>
-      <td><select id="udept-${u.id}">${state.departments.map(d=>`<option value="${d.id}" ${u.department_id===d.id?'selected':''}>${escapeHtml(d.name)}</option>`).join('')}</select></td>
+      <td>${renderCompanyMultiSelect(u.id)}</td>
       <td><select id="urole-${u.id}">
         <option value="viewer" ${u.role==='viewer'?'selected':''}>viewer</option>
         <option value="process_owner" ${u.role==='process_owner'?'selected':''}>process_owner</option>
