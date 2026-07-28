@@ -653,10 +653,10 @@ async function exportExcel(processIdOnly){
         if(tasks.length===0){ rows.push({...base, "L4 Task":'', "L5 Transaction":'', "L5 Field":'', "L5 Tool":''}); return; }
         tasks.forEach(task=>{
           if(!task.text || !task.text.trim()) return;
-          const wis = (task.work_instructions||[]).sort((a,b)=>a.position-b.position);
+          const wis = (task.work_instructions||[]).sort((a,b)=>a.position-b.position)
+            .filter(wi=> wi.transaction || wi.field || wi.tool);
           if(wis.length===0){ rows.push({...base, "L4 Task":task.text, "L5 Transaction":'', "L5 Field":'', "L5 Tool":''}); return; }
           wis.forEach(wi=>{
-            if(!wi.transaction && !wi.field && !wi.tool) return;
             rows.push({...base, "L4 Task":task.text, "L5 Transaction":wi.transaction||'', "L5 Field":wi.field||'', "L5 Tool":wi.tool||''});
           });
         });
