@@ -1035,7 +1035,7 @@ function renderEditor(){
   const companyName = p.companies ? p.companies.name : '';
   app.innerHTML = `${renderHeader()}
   <div class="wrap">
-    <div class="header" style="padding:14px 24px; flex-wrap:wrap;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
       <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">${escapeHtml(companyName)} — ${escapeHtml(p.l1_name || '')}</div>
         <button style="width:32px; height:32px; border-radius:8px; border:1px solid var(--gray-200); background:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--gray-700); flex-shrink:0;" onclick="toggleMegaCycleSwitcher()" title="Switch mega-cycle">✎</button>
@@ -1046,7 +1046,7 @@ function renderEditor(){
           </select>` : ''}
       </div>
       <div class="actions">
-        <button class="btn btn-ghost" style="min-width:110px; text-align:center;" onclick="backToCompanies()">🏠 Home</button>
+        <button class="btn btn-ghost" style="min-width:110px; text-align:center;" onclick="backToCompanies()">Home</button>
         <button class="btn btn-dark" style="min-width:110px; text-align:center;" onclick="exportExcel(state.editorProcess.id)">⭳ Export</button>
       </div>
     </div>
