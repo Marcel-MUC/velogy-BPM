@@ -1160,6 +1160,7 @@ function rowStatusHtml(isSel){
 
 function renderEditorLeftPanel(){
   const p = state.editorProcess;
+  const readOnly = state.profile.role === 'viewer';
   const selSp = p.l2_locked ? (p.subprocesses.find(s=>s.id===state.editorSelectedSpId) || null) : null;
   const selStep = (selSp && selSp.l3_locked) ? (selSp.steps.find(s=>s.id===state.editorSelectedStepId) || null) : null;
   const selTask = (selStep && selStep.l4_locked) ? (selStep.tasks.find(t=>t.id===state.editorSelectedTaskId) || null) : null;
@@ -1177,12 +1178,16 @@ function renderEditorLeftPanel(){
   if(!p.l2_locked){
     if(p.subprocesses.length===0) html += `<div class="empty-note">No sub-processes yet.</div>`;
     p.subprocesses.forEach(sp=>{
-      html += `<div class="row-input">
-        <input type="text" placeholder="e.g. Order management" value="${escapeHtml(sp.name)}" oninput="onSubName('${sp.id}', this.value)">
-        <button class="icon-btn" onclick="removeSubprocess('${sp.id}')">✕</button>
-      </div>`;
+      if(readOnly){
+        html += `<div class="row-input"><span style="flex:1;">${escapeHtml(sp.name || '(untitled)')}</span></div>`;
+      } else {
+        html += `<div class="row-input">
+          <input type="text" placeholder="e.g. Order management" value="${escapeHtml(sp.name)}" oninput="onSubName('${sp.id}', this.value)">
+          <button class="icon-btn" onclick="removeSubprocess('${sp.id}')">✕</button>
+        </div>`;
+      }
     });
-    html += `<button class="link-btn" onclick="addSubprocess()">+ add sub-process</button>`;
+    if(!readOnly) html += `<button class="link-btn" onclick="addSubprocess()">+ add sub-process</button>`;
   } else {
     html += `<div class="card-desc" style="opacity:.5;">Click a sub-process to work on it in L3. Click it again to switch to another one.</div>`;
     p.subprocesses.forEach(sp=>{
@@ -1193,9 +1198,11 @@ function renderEditorLeftPanel(){
       </div>`;
     });
   }
-  html += p.l2_locked
-    ? renderSavedRow('unlockL2()')
-    : `<button id="l2-save-btn" class="lock-btn" ${!p.subprocesses.some(s=>s.name.trim()) ? 'disabled':''} onclick="lockL2()">Save L2 → go to L3</button>`;
+  if(!readOnly){
+    html += p.l2_locked
+      ? renderSavedRow('unlockL2()')
+      : `<button id="l2-save-btn" class="lock-btn" ${!p.subprocesses.some(s=>s.name.trim()) ? 'disabled':''} onclick="lockL2()">Save L2 → go to L3</button>`;
+  }
   html += `</div>`;
 
   /* ---------- L3: steps of the selected sub-process ---------- */
@@ -1210,14 +1217,20 @@ function renderEditorLeftPanel(){
     if(!selSp.l3_locked){
       if(selSp.steps.length===0) html += `<div class="empty-note">No steps yet.</div>`;
       selSp.steps.forEach(st=>{
-        html += `<div class="row-input">
-          <input type="text" placeholder="e.g. Create sales order" value="${escapeHtml(st.text)}" oninput="onStepText('${selSp.id}','${st.id}', this.value)">
-          <button class="icon-btn" onclick="removeStep('${selSp.id}','${st.id}')">✕</button>
-        </div>`;
+        if(readOnly){
+          html += `<div class="row-input"><span style="flex:1;">${escapeHtml(st.text || '(untitled)')}</span></div>`;
+        } else {
+          html += `<div class="row-input">
+            <input type="text" placeholder="e.g. Create sales order" value="${escapeHtml(st.text)}" oninput="onStepText('${selSp.id}','${st.id}', this.value)">
+            <button class="icon-btn" onclick="removeStep('${selSp.id}','${st.id}')">✕</button>
+          </div>`;
+        }
       });
-      html += `<button class="link-btn" onclick="addStep('${selSp.id}')">+ add step</button>`;
-      const hasAnyStep = selSp.steps.some(s=>s.text.trim());
-      html += `<button id="l3-save-btn" class="lock-btn" ${!hasAnyStep ? 'disabled':''} onclick="lockL3ForSp('${selSp.id}')">Save L3 → select a step</button>`;
+      if(!readOnly){
+        html += `<button class="link-btn" onclick="addStep('${selSp.id}')">+ add step</button>`;
+        const hasAnyStep = selSp.steps.some(s=>s.text.trim());
+        html += `<button id="l3-save-btn" class="lock-btn" ${!hasAnyStep ? 'disabled':''} onclick="lockL3ForSp('${selSp.id}')">Save L3 → select a step</button>`;
+      }
     } else {
       html += `<div class="card-desc" style="opacity:.5;">Click a step to work on its tasks in L4.</div>`;
       selSp.steps.forEach(st=>{
@@ -1227,7 +1240,7 @@ function renderEditorLeftPanel(){
           ${rowStatusHtml(isSel)}
         </div>`;
       });
-      html += renderSavedRow(`unlockL3ForSp('${selSp.id}')`);
+      if(!readOnly) html += renderSavedRow(`unlockL3ForSp('${selSp.id}')`);
     }
   }
   html += `</div>`;
@@ -1243,14 +1256,20 @@ function renderEditorLeftPanel(){
     if(!selStep.l4_locked){
       if(selStep.tasks.length===0) html += `<div class="empty-note">No tasks yet.</div>`;
       selStep.tasks.forEach(task=>{
-        html += `<div class="row-input">
-          <input type="text" placeholder="e.g. Enter customer ID" value="${escapeHtml(task.text)}" oninput="onTaskText('${selSp.id}','${selStep.id}','${task.id}', this.value)">
-          <button class="icon-btn" onclick="removeTask('${selSp.id}','${selStep.id}','${task.id}')">✕</button>
-        </div>`;
+        if(readOnly){
+          html += `<div class="row-input"><span style="flex:1;">${escapeHtml(task.text || '(untitled)')}</span></div>`;
+        } else {
+          html += `<div class="row-input">
+            <input type="text" placeholder="e.g. Enter customer ID" value="${escapeHtml(task.text)}" oninput="onTaskText('${selSp.id}','${selStep.id}','${task.id}', this.value)">
+            <button class="icon-btn" onclick="removeTask('${selSp.id}','${selStep.id}','${task.id}')">✕</button>
+          </div>`;
+        }
       });
-      html += `<button class="link-btn" onclick="addTask('${selSp.id}','${selStep.id}')">+ add task</button>`;
-      const hasAnyTask = selStep.tasks.some(t=>t.text.trim());
-      html += `<button id="l4-save-btn" class="lock-btn" ${!hasAnyTask ? 'disabled':''} onclick="lockL4ForStep('${selSp.id}','${selStep.id}')">Save L4 → select a task for L5</button>`;
+      if(!readOnly){
+        html += `<button class="link-btn" onclick="addTask('${selSp.id}','${selStep.id}')">+ add task</button>`;
+        const hasAnyTask = selStep.tasks.some(t=>t.text.trim());
+        html += `<button id="l4-save-btn" class="lock-btn" ${!hasAnyTask ? 'disabled':''} onclick="lockL4ForStep('${selSp.id}','${selStep.id}')">Save L4 → select a task for L5</button>`;
+      }
     } else {
       html += `<div class="card-desc" style="opacity:.5;">Click a task to work on its work instructions in L5.</div>`;
       selStep.tasks.forEach(task=>{
@@ -1260,7 +1279,7 @@ function renderEditorLeftPanel(){
           ${rowStatusHtml(isSel)}
         </div>`;
       });
-      html += renderSavedRow(`unlockL4ForStep('${selSp.id}','${selStep.id}')`);
+      if(!readOnly) html += renderSavedRow(`unlockL4ForStep('${selSp.id}','${selStep.id}')`);
     }
   }
   html += `</div>`;
@@ -1278,16 +1297,28 @@ function renderEditorLeftPanel(){
     if(selTask.work_instructions.length===0) html += `<div class="empty-note">No work instructions yet.</div>`;
     if(!selTask.l5_locked){
       selTask.work_instructions.forEach(wi=>{
-        html += `<div class="wi-row">
-          <input type="text" placeholder="Transaction" value="${escapeHtml(wi.transaction)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','transaction', this.value)">
-          <input type="text" placeholder="Field" value="${escapeHtml(wi.field)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','field', this.value)">
-          <input type="text" placeholder="Tool" value="${escapeHtml(wi.tool)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','tool', this.value)">
-          <button class="icon-btn" onclick="removeWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}')">✕</button>
-        </div>`;
+        if(readOnly){
+          html += `<div class="wi-view">
+            <div class="wi-view-grid">
+              <div><div class="wi-view-label">TRANSACTION</div><div class="wi-view-value">${escapeHtml(wi.transaction) || '—'}</div></div>
+              <div><div class="wi-view-label">FIELD</div><div class="wi-view-value">${escapeHtml(wi.field) || '—'}</div></div>
+              <div><div class="wi-view-label">TOOL</div><div class="wi-view-value">${escapeHtml(wi.tool) || '—'}</div></div>
+            </div>
+          </div>`;
+        } else {
+          html += `<div class="wi-row">
+            <input type="text" placeholder="Transaction" value="${escapeHtml(wi.transaction)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','transaction', this.value)">
+            <input type="text" placeholder="Field" value="${escapeHtml(wi.field)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','field', this.value)">
+            <input type="text" placeholder="Tool" value="${escapeHtml(wi.tool)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','tool', this.value)">
+            <button class="icon-btn" onclick="removeWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}')">✕</button>
+          </div>`;
+        }
       });
-      html += `<button class="link-btn" onclick="addWI('${selSp.id}','${selStep.id}','${selTask.id}')">+ add work instruction</button>`;
-      const hasAnyWI = selTask.work_instructions.some(wi=>wi.transaction.trim()||wi.field.trim()||wi.tool.trim());
-      html += `<button id="l5-save-btn" class="lock-btn" ${!hasAnyWI ? 'disabled':''} onclick="lockL5ForTask('${selSp.id}','${selStep.id}','${selTask.id}')">Save L5</button>`;
+      if(!readOnly){
+        html += `<button class="link-btn" onclick="addWI('${selSp.id}','${selStep.id}','${selTask.id}')">+ add work instruction</button>`;
+        const hasAnyWI = selTask.work_instructions.some(wi=>wi.transaction.trim()||wi.field.trim()||wi.tool.trim());
+        html += `<button id="l5-save-btn" class="lock-btn" ${!hasAnyWI ? 'disabled':''} onclick="lockL5ForTask('${selSp.id}','${selStep.id}','${selTask.id}')">Save L5</button>`;
+      }
     } else {
       selTask.work_instructions.forEach(wi=>{
         html += `<div class="wi-view">
@@ -1298,7 +1329,7 @@ function renderEditorLeftPanel(){
           </div>
         </div>`;
       });
-      html += renderSavedRow(`unlockL5ForTask('${selSp.id}','${selStep.id}','${selTask.id}')`);
+      if(!readOnly) html += renderSavedRow(`unlockL5ForTask('${selSp.id}','${selStep.id}','${selTask.id}')`);
     }
   }
   html += `</div>`;
