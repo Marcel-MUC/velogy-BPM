@@ -645,9 +645,11 @@ async function exportExcel(processIdOnly, companyIdOnly){
   const { data, error } = await query;
   if(error){ toast(error.message); return; }
   const rows = [];
+  let hasAnySubprocessName = false;
   (data||[]).forEach(proc=>{
     (proc.subprocesses||[]).sort((a,b)=>a.position-b.position).forEach(sp=>{
       if(!sp.name || !sp.name.trim()) return;
+      hasAnySubprocessName = true;
       (sp.steps||[]).sort((a,b)=>a.position-b.position).forEach(st=>{
         if(!st.text || !st.text.trim()) return;
         const base = {
@@ -671,7 +673,12 @@ async function exportExcel(processIdOnly, companyIdOnly){
       });
     });
   });
-  if(rows.length===0){ toast('Nothing to export.'); return; }
+  if(rows.length===0){
+    toast(hasAnySubprocessName
+      ? 'Add at least one L3 process step before you can export.'
+      : 'Nothing to export yet — add some content first.');
+    return;
+  }
   const ws = XLSX.utils.json_to_sheet(rows);
   ws['!cols'] = [{wch:16},{wch:16},{wch:20},{wch:20},{wch:26},{wch:26},{wch:16},{wch:16},{wch:16}];
   const wb = XLSX.utils.book_new();
