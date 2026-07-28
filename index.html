@@ -154,14 +154,25 @@
   .inline-form{ display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
   .inline-form input,.inline-form select{ width:auto; flex:1; min-width:140px; }
 
-  .access-company-row{ border-bottom:1px solid var(--gray-100); padding:10px 0; }
-  .access-company-row:last-child{ border-bottom:none; }
-  .access-company-header{ display:flex; align-items:center; gap:8px; font-weight:600; font-size:13.5px; cursor:pointer; }
-  .access-scope-radios{ display:flex; gap:16px; margin:8px 0 0 24px; font-size:12.5px; color:var(--gray-700); }
+  .access-scope-radios{ display:flex; gap:16px; font-size:12.5px; color:var(--gray-700); }
   .access-scope-radios label{ display:flex; align-items:center; gap:5px; cursor:pointer; font-weight:500; }
-  .access-process-list{ margin:8px 0 0 24px; display:flex; flex-direction:column; gap:4px; max-height:140px;
-    overflow-y:auto; padding:8px; background:var(--gray-50); border-radius:8px; }
-  .access-process-item{ display:flex; align-items:center; gap:8px; font-size:12.5px; cursor:pointer; font-weight:500; }
+
+  .access-tree{ background:#fff; border:1px solid var(--gray-200); border-radius:14px; padding:8px; }
+  .access-tree-node{ display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px;
+    cursor:pointer; font-size:13.5px; font-weight:600; color:var(--gray-800); }
+  .access-tree-node:hover{ background:var(--gray-50); }
+  .access-tree-node.sel{ background:var(--violet-light); color:var(--violet-dark); }
+  .access-tree-toggle{ width:14px; flex-shrink:0; color:var(--gray-500); font-size:11px; }
+  .access-tree-label{ flex:1; }
+  .access-tree-children{ margin-bottom:4px; }
+  .access-tree-node.child{ padding-left:30px; font-weight:500; font-size:13px; }
+  .access-user-row{ display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:8px 0; border-bottom:1px solid var(--gray-100); font-size:13px; }
+  .access-user-row:last-child{ border-bottom:none; }
+  .access-user-row .access-user-name{ flex:1; }
+  .level-badge{ font-size:11px; font-weight:600; padding:2px 8px; border-radius:999px; white-space:nowrap; }
+  .level-badge.edit{ background:var(--violet-light); color:var(--violet-dark); }
+  .level-badge.view{ background:var(--gray-100); color:var(--gray-700); }
 
   .modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:flex; align-items:center;
     justify-content:center; z-index:40; }
@@ -220,8 +231,9 @@ let state = {
   adminProfileCompanyRows: [],
   adminUcapMap: {},
   adminAuditLog: [],
-  accessModalFor: null,
-  accessModalDraft: {},
+  accessTreeExpanded: {},
+  accessTreeSelected: null,
+  addAccessLevel: 'view',
   authError: ''
 };
 
@@ -367,7 +379,8 @@ async function doSignOut(){
     editorSelectedStepId:null,
     editorSelectedTaskId:null,
     adminTab:'pending', adminPending:[], adminUsers:[],
-    adminProfileCompanyRows:[], adminUcapMap:{}, adminAuditLog:[], accessModalFor:null, accessModalDraft:{}, authError:'' };
+    adminProfileCompanyRows:[], adminUcapMap:{}, adminAuditLog:[],
+    accessTreeExpanded:{}, accessTreeSelected:null, addAccessLevel:'view', authError:'' };
   render();
 }
 async function doForgotPassword(email){
@@ -858,56 +871,22 @@ async function updateUser(id){
   await loadAdminData(); render();
 }
 
-/* ---------- Permissions tab: per-user company/mega-cycle access ---------- */
-function openAccessModal(profileId){
-  const rows = state.adminProfileCompanyRows.filter(r=>r.profile_id===profileId);
-  const draft = {};
-  rows.forEach(r=>{
-    draft[r.company_id] = {
-      level: r.level,
-      scope: r.scope,
-      processIds: r.scope==='specific' ? (state.adminUcapMap[r.id] || []).slice() : []
-    };
-  });
-  state.accessModalFor = profileId;
-  state.accessModalDraft = draft;
-  render();
-}
-function closeAccessModal(){
-  state.accessModalFor = null;
-  state.accessModalDraft = {};
-  render();
-}
-function toggleAccessCompany(companyId){
-  if(state.accessModalDraft[companyId]) delete state.accessModalDraft[companyId];
-  else state.accessModalDraft[companyId] = { level:'view', scope:'all', processIds:[] };
-  render();
-}
-function setAccessLevel(companyId, level){
-  if(!state.accessModalDraft[companyId]) return;
-  state.accessModalDraft[companyId].level = level;
-  render();
-}
-function setAccessScope(companyId, scope){
-  if(!state.accessModalDraft[companyId]) return;
-  state.accessModalDraft[companyId].scope = scope;
-  render();
-}
-function toggleAccessProcess(companyId, processId){
-  const entry = state.accessModalDraft[companyId];
-  if(!entry) return;
-  const idx = entry.processIds.indexOf(processId);
-  if(idx>-1) entry.processIds.splice(idx,1); else entry.processIds.push(processId);
-  render();
-}
-function summarizeAccessEntry(companyId, entry){
-  if(!entry) return null;
+/* ---------- Permissions tab: access tree (company -> mega-cycle) ---------- */
+function companyLabel(companyId){
   const c = state.companies.find(x=>x.id===companyId);
-  const companyName = c ? c.name : companyId;
-  const levelLabel = entry.level === 'edit' ? 'Editor' : 'Viewer';
+  return c ? c.name : companyId;
+}
+function processLabel(companyId, processId){
+  const c = state.companies.find(x=>x.id===companyId);
+  const p = c && c.processes ? c.processes.find(x=>x.id===processId) : null;
+  return p ? p.l1_name : processId;
+}
+function summarizeGrant(companyId, level, scope, processIds){
+  const c = state.companies.find(x=>x.id===companyId);
+  const levelLabel = level === 'edit' ? 'Editor' : 'Viewer';
   let scopeLabel;
-  if(entry.scope === 'specific'){
-    const names = (entry.processIds||[]).map(pid=>{
+  if(scope === 'specific'){
+    const names = (processIds||[]).map(pid=>{
       const p = c && c.processes ? c.processes.find(x=>x.id===pid) : null;
       return p ? p.l1_name : pid;
     });
@@ -915,55 +894,91 @@ function summarizeAccessEntry(companyId, entry){
   } else {
     scopeLabel = 'All mega-cycles';
   }
-  return `${companyName}: ${levelLabel} / ${scopeLabel}`;
+  return `${companyLabel(companyId)}: ${levelLabel} / ${scopeLabel}`;
 }
-async function saveAccessModal(){
-  const profileId = state.accessModalFor;
-  const draft = state.accessModalDraft;
-  const beforeMap = {};
-  state.adminProfileCompanyRows.filter(r=>r.profile_id===profileId).forEach(r=>{
-    beforeMap[r.company_id] = { level:r.level, scope:r.scope, processIds: r.scope==='specific' ? (state.adminUcapMap[r.id]||[]) : [] };
+function toggleAccessTreeCompany(companyId){
+  state.accessTreeExpanded[companyId] = !state.accessTreeExpanded[companyId];
+  render();
+}
+function selectAccessTreeNode(type, companyId, processId){
+  state.accessTreeSelected = { type, companyId, processId: processId || null };
+  state.addAccessLevel = 'view';
+  render();
+}
+function getGrantsForSelectedNode(){
+  const sel = state.accessTreeSelected;
+  if(!sel) return [];
+  const result = [];
+  state.adminProfileCompanyRows.forEach(r=>{
+    if(r.company_id !== sel.companyId) return;
+    if(r.scope === 'all'){
+      result.push({ row:r, profileId:r.profile_id, level:r.level });
+    } else if(sel.type === 'process' && r.scope === 'specific'){
+      const pids = state.adminUcapMap[r.id] || [];
+      if(pids.includes(sel.processId)) result.push({ row:r, profileId:r.profile_id, level:r.level });
+    }
   });
+  return result;
+}
+async function removeNodeAccess(profileCompanyRowId){
+  if(!await showConfirm('Remove this access?')) return;
+  const row = state.adminProfileCompanyRows.find(r=>r.id===profileCompanyRowId);
+  const { error } = await sb.from('profile_companies').delete().eq('id', profileCompanyRowId);
+  if(error){ showError(error.message); return; }
+  if(row){
+    const pids = state.adminUcapMap[row.id] || [];
+    await logAudit(row.profile_id, 'company_access_revoked', summarizeGrant(row.company_id, row.level, row.scope, pids), null);
+  }
+  toast('Access removed.');
+  await loadAdminData(); render();
+}
+async function addAccessToSelectedNode(){
+  const sel = state.accessTreeSelected;
+  if(!sel) return;
+  const userSelect = document.getElementById('add-access-user');
+  const userId = userSelect ? userSelect.value : '';
+  if(!userId){ toast('Please choose a user first.'); return; }
+  // Read exactly once, right here — nothing else touches this value before
+  // it's written below, for either the update or the insert path.
+  const level = state.addAccessLevel;
 
-  const { error: delError } = await sb.from('profile_companies').delete().eq('profile_id', profileId);
-  if(delError){ showError(delError.message); return; }
+  const existing = state.adminProfileCompanyRows.find(r=> r.profile_id===userId && r.company_id===sel.companyId);
+  const existingPids = existing ? (state.adminUcapMap[existing.id] || []) : [];
+  const beforeLabel = existing ? summarizeGrant(sel.companyId, existing.level, existing.scope, existingPids) : null;
 
-  const companyIds = Object.keys(draft);
-  if(companyIds.length > 0){
-    const rows = companyIds.map(cid => ({ profile_id: profileId, company_id: cid, level: draft[cid].level, scope: draft[cid].scope }));
-    const { data: inserted, error: insError } = await sb.from('profile_companies').insert(rows).select('id, company_id');
-    if(insError){ showError(insError.message); return; }
-
-    const ucapRows = [];
-    (inserted || []).forEach(row=>{
-      const entry = draft[row.company_id];
-      if(entry.scope === 'specific'){
-        entry.processIds.forEach(pid=> ucapRows.push({ user_company_access_id: row.id, process_id: pid }));
-      }
-    });
-    if(ucapRows.length > 0){
-      const { error: ucapError } = await sb.from('user_company_access_processes').insert(ucapRows);
-      if(ucapError){ showError(ucapError.message); return; }
-    }
+  let newScope, newProcessIds;
+  if(sel.type === 'company' || (existing && existing.scope === 'all')){
+    newScope = 'all'; newProcessIds = [];
+  } else {
+    newScope = 'specific';
+    newProcessIds = (existing && existing.scope==='specific')
+      ? Array.from(new Set([...existingPids, sel.processId]))
+      : [sel.processId];
   }
 
-  const allCompanyIds = new Set([...Object.keys(beforeMap), ...companyIds]);
-  for(const cid of allCompanyIds){
-    const b = beforeMap[cid];
-    const a = draft[cid];
-    if(b && !a){
-      await logAudit(profileId, 'company_access_revoked', summarizeAccessEntry(cid, b), null);
-    } else if(!b && a){
-      await logAudit(profileId, 'company_access_granted', null, summarizeAccessEntry(cid, a));
-    } else if(b && a){
-      const changed = b.level!==a.level || b.scope!==a.scope ||
-        JSON.stringify([...b.processIds].sort()) !== JSON.stringify([...a.processIds].sort());
-      if(changed) await logAudit(profileId, 'company_access_granted', summarizeAccessEntry(cid, b), summarizeAccessEntry(cid, a));
-    }
+  let rowId;
+  if(existing){
+    const { error } = await sb.from('profile_companies').update({ level, scope:newScope }).eq('id', existing.id);
+    if(error){ showError(error.message); return; }
+    rowId = existing.id;
+    const { error: delUcapErr } = await sb.from('user_company_access_processes').delete().eq('user_company_access_id', rowId);
+    if(delUcapErr){ showError(delUcapErr.message); return; }
+  } else {
+    const { data, error } = await sb.from('profile_companies')
+      .insert({ profile_id:userId, company_id:sel.companyId, level, scope:newScope }).select('id').single();
+    if(error){ showError(error.message); return; }
+    rowId = data.id;
+  }
+  if(newScope === 'specific' && newProcessIds.length){
+    const { error: ucapErr } = await sb.from('user_company_access_processes')
+      .insert(newProcessIds.map(pid=>({ user_company_access_id: rowId, process_id: pid })));
+    if(ucapErr){ showError(ucapErr.message); return; }
   }
 
-  toast('Access updated.');
-  closeAccessModal();
+  await logAudit(userId, 'company_access_granted', beforeLabel, summarizeGrant(sel.companyId, level, newScope, newProcessIds));
+
+  toast('Access added.');
+  state.addAccessLevel = 'view';
   await loadAdminData(); render();
 }
 
@@ -1194,8 +1209,7 @@ function renderAdmin(){
       ${state.adminTab==='audit' ? renderAdminAuditLog() : ''}
       ${state.adminTab==='depts' ? renderAdminDepts() : ''}
     </div>
-  </div>
-  ${state.accessModalFor ? renderAccessModal() : ''}`;
+  </div>`;
 }
 function renderAdminPending(){
   if(state.adminPending.length===0) return `<div class="empty-note">No pending requests.</div>`;
@@ -1244,82 +1258,83 @@ function renderAdminUsers(){
   `).join('')}
   </tbody></table>`;
 }
-function renderAccessSummary(profileId){
-  const rows = state.adminProfileCompanyRows.filter(r=>r.profile_id===profileId);
-  if(rows.length===0) return `<span style="color:var(--gray-400); font-size:12.5px;">No companies assigned</span>`;
-  const names = rows.map(r=>{
-    const c = state.companies.find(x=>x.id===r.company_id);
-    return c ? c.name : null;
-  }).filter(Boolean);
-  if(names.length <= 2) return escapeHtml(names.join(', '));
-  return `${rows.length} companies`;
-}
 function renderAdminPermissions(){
-  if(state.adminUsers.length===0) return `<div class="empty-note">No users yet.</div>`;
-  return `<table class="admin-table"><thead><tr>
-    <th>Name</th><th>Email</th><th>Access</th><th></th>
-  </tr></thead><tbody>
-  ${state.adminUsers.map(u=>`
-    <tr>
-      <td>${escapeHtml(u.full_name || '—')}</td>
-      <td>${escapeHtml(u.email || '')}</td>
-      <td>${renderAccessSummary(u.id)}</td>
-      <td><button class="btn btn-primary" onclick="openAccessModal('${u.id}')">Manage access</button></td>
-    </tr>
-  `).join('')}
-  </tbody></table>`;
-}
-function renderAccessModal(){
-  const user = state.adminUsers.find(u=>u.id===state.accessModalFor);
-  if(!user) return '';
-  if(user.role === 'admin'){
-    return `<div class="modal-overlay blur" onclick="if(event.target===this) closeAccessModal()">
-      <div class="modal" style="width:480px;">
-        <h3>Manage access — ${escapeHtml(user.full_name || user.email || '')}</h3>
-        <div class="empty-note">This user is an Admin and already has access to everything.</div>
-        <div style="display:flex; justify-content:flex-end; margin-top:20px; padding-top:14px; border-top:1px solid var(--gray-200);">
-          <button class="btn btn-ghost" onclick="closeAccessModal()">Close</button>
-        </div>
-      </div>
-    </div>`;
-  }
-  const draft = state.accessModalDraft;
-  return `<div class="modal-overlay blur" onclick="if(event.target===this) closeAccessModal()">
-    <div class="modal" style="width:480px; max-height:80vh; overflow-y:auto;">
-      <h3>Manage access — ${escapeHtml(user.full_name || user.email || '')}</h3>
-      ${state.companies.length===0 ? `<div class="empty-note">No companies yet.</div>` : state.companies.map(c=>{
-        const entry = draft[c.id];
-        const checked = !!entry;
-        return `<div class="access-company-row">
-          <label class="access-company-header">
-            <input type="checkbox" ${checked?'checked':''} onchange="toggleAccessCompany('${c.id}')">
-            <span>${escapeHtml(c.name)}</span>
-          </label>
-          ${checked ? `
-            <div class="access-scope-radios">
-              <label><input type="radio" name="access-level-${c.id}" ${entry.level==='view'?'checked':''} onchange="setAccessLevel('${c.id}','view')"> Viewer</label>
-              <label><input type="radio" name="access-level-${c.id}" ${entry.level==='edit'?'checked':''} onchange="setAccessLevel('${c.id}','edit')"> Editor</label>
-            </div>
-            <div class="access-scope-radios">
-              <label><input type="radio" name="access-scope-${c.id}" ${entry.scope==='all'?'checked':''} onchange="setAccessScope('${c.id}','all')"> All mega-cycles</label>
-              <label><input type="radio" name="access-scope-${c.id}" ${entry.scope==='specific'?'checked':''} onchange="setAccessScope('${c.id}','specific')"> Specific</label>
-            </div>
-            ${entry.scope==='specific' ? `
-              <div class="access-process-list">
-                ${(c.processes||[]).length===0 ? `<div class="empty-note" style="padding:0;">No mega-cycles yet for this company.</div>` : c.processes.map(p=>`
-                  <label class="access-process-item">
-                    <input type="checkbox" ${entry.processIds.includes(p.id)?'checked':''} onchange="toggleAccessProcess('${c.id}','${p.id}')">
-                    <span>${escapeHtml(p.l1_name)}</span>
-                  </label>`).join('')}
-              </div>` : ''}
-          ` : ''}
-        </div>`;
-      }).join('')}
-      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; padding-top:14px; border-top:1px solid var(--gray-200);">
-        <button class="btn btn-ghost" onclick="closeAccessModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="saveAccessModal()">Save</button>
+  return `<div style="display:grid; grid-template-columns:300px 1fr; gap:24px; align-items:start;">
+    <div>
+      ${renderAccessTree()}
+      <div style="margin-top:16px;">
+        ${renderAccessNodeUsers()}
       </div>
     </div>
+    <div>
+      ${renderAddAccessPanel()}
+    </div>
+  </div>`;
+}
+function renderAccessTree(){
+  if(state.companies.length===0) return `<div class="empty-note">No companies yet.</div>`;
+  return `<div class="access-tree">
+    ${state.companies.map(c=>{
+      const isExp = !!state.accessTreeExpanded[c.id];
+      const isSelCompany = state.accessTreeSelected && state.accessTreeSelected.type==='company' && state.accessTreeSelected.companyId===c.id;
+      return `<div>
+        <div class="access-tree-node ${isSelCompany?'sel':''}">
+          <span class="access-tree-toggle" onclick="event.stopPropagation(); toggleAccessTreeCompany('${c.id}')">${isExp?'▾':'▸'}</span>
+          <span class="access-tree-label" onclick="selectAccessTreeNode('company','${c.id}')">${escapeHtml(c.name)}</span>
+        </div>
+        ${isExp ? `<div class="access-tree-children">
+          ${(c.processes||[]).length===0 ? `<div class="empty-note" style="padding:4px 0 4px 30px;">No mega-cycles yet.</div>` : c.processes.map(p=>{
+            const isSelProcess = state.accessTreeSelected && state.accessTreeSelected.type==='process' && state.accessTreeSelected.companyId===c.id && state.accessTreeSelected.processId===p.id;
+            return `<div class="access-tree-node child ${isSelProcess?'sel':''}" onclick="selectAccessTreeNode('process','${c.id}','${p.id}')">
+              <span class="access-tree-label">${escapeHtml(p.l1_name)}</span>
+            </div>`;
+          }).join('')}
+        </div>` : ''}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+function renderAccessNodeUsers(){
+  const sel = state.accessTreeSelected;
+  if(!sel) return `<div class="empty-note">Select a company or mega-cycle on the left to see who has access.</div>`;
+  const label = sel.type==='company' ? companyLabel(sel.companyId) : `${companyLabel(sel.companyId)} — ${processLabel(sel.companyId, sel.processId)}`;
+  const grants = getGrantsForSelectedNode();
+  return `<div>
+    <div class="subblock-title" style="margin-bottom:10px;">Access to: ${escapeHtml(label)}</div>
+    ${grants.length===0 ? `<div class="empty-note">No one has access here yet.</div>` : grants.map(g=>{
+      const u = state.adminUsers.find(x=>x.id===g.profileId);
+      const name = u ? (u.full_name || u.email || g.profileId) : g.profileId;
+      return `<div class="access-user-row">
+        <span class="access-user-name">${escapeHtml(name)}</span>
+        <span class="level-badge ${g.level==='edit'?'edit':'view'}">${g.level==='edit'?'Editor':'Viewer'}</span>
+        <button class="icon-btn" onclick="removeNodeAccess('${g.row.id}')">✕</button>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+function renderAddAccessPanel(){
+  const sel = state.accessTreeSelected;
+  if(!sel) return `<div class="card"><div class="empty-note">Select a company or mega-cycle on the left first.</div></div>`;
+  const label = sel.type==='company' ? companyLabel(sel.companyId) : `${companyLabel(sel.companyId)} — ${processLabel(sel.companyId, sel.processId)}`;
+  const candidates = state.adminUsers.filter(u=>u.role!=='admin');
+  return `<div class="card">
+    <div class="card-title" style="margin-bottom:4px;">Add access</div>
+    <div class="card-hint" style="margin-bottom:14px;">${escapeHtml(label)}</div>
+    <div class="field">
+      <label>User</label>
+      <select id="add-access-user">
+        <option value="">— choose a user —</option>
+        ${candidates.map(u=>`<option value="${u.id}">${escapeHtml(u.full_name || u.email || u.id)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field">
+      <label>Level</label>
+      <div class="access-scope-radios">
+        <label><input type="radio" name="add-access-level" ${state.addAccessLevel==='view'?'checked':''} onchange="state.addAccessLevel='view'; render();"> Viewer</label>
+        <label><input type="radio" name="add-access-level" ${state.addAccessLevel==='edit'?'checked':''} onchange="state.addAccessLevel='edit'; render();"> Editor</label>
+      </div>
+    </div>
+    <button class="btn btn-primary" style="width:100%; margin-top:6px;" onclick="addAccessToSelectedNode()">Add</button>
   </div>`;
 }
 function renderAdminAuditLog(){
