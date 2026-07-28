@@ -155,7 +155,8 @@
   .inline-form{ display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
   .inline-form input,.inline-form select{ width:auto; flex:1; min-width:140px; }
 
-  .company-ms-wrap{ position:relative; min-width:180px; }
+  .company-ms-wrap{ position:relative; z-index:1; min-width:180px; }
+  .company-ms-wrap.open{ z-index:50; }
   .company-ms-btn{ position:relative; z-index:21; width:100%; min-height:36px; padding:6px 10px;
     border:1px solid var(--gray-200); border-radius:8px; background:#fff; cursor:pointer;
     display:flex; align-items:center; justify-content:space-between; gap:6px; font-family:inherit; }
@@ -1097,7 +1098,7 @@ function renderCompanyMultiSelect(rowId){
         return c ? `<span class="chip">${escapeHtml(c.name)}</span>` : '';
       }).join('')
     : `<span style="color:var(--gray-400); font-size:12.5px;">No companies assigned</span>`;
-  return `<div class="company-ms-wrap">
+  return `<div class="company-ms-wrap ${isOpen?'open':''}">
     ${isOpen ? `<div class="company-ms-overlay" onclick="closeCompanyMultiSelect()"></div>` : ''}
     <button type="button" class="company-ms-btn" onclick="toggleCompanyMultiSelect('${rowId}')">
       <span class="company-ms-chips">${chipsHtml}</span>
