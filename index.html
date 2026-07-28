@@ -173,6 +173,8 @@
   .level-badge{ font-size:11px; font-weight:600; padding:2px 8px; border-radius:999px; white-space:nowrap; }
   .level-badge.edit{ background:var(--violet-light); color:var(--violet-dark); }
   .level-badge.view{ background:var(--gray-100); color:var(--gray-700); }
+  .group-tag{ font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
+    padding:2px 7px; border-radius:999px; white-space:nowrap; background:var(--navy); color:#fff; }
 
   .modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:flex; align-items:center;
     justify-content:center; z-index:40; }
@@ -231,6 +233,9 @@ let state = {
   adminProfileCompanyRows: [],
   adminUcapMap: {},
   adminAuditLog: [],
+  adminGroups: [],
+  adminGroupMembers: [],
+  groupMembersModalFor: null,
   accessTreeExpanded: {},
   accessTreeSelected: null,
   addAccessLevel: 'view',
@@ -380,6 +385,7 @@ async function doSignOut(){
     editorSelectedTaskId:null,
     adminTab:'pending', adminPending:[], adminUsers:[],
     adminProfileCompanyRows:[], adminUcapMap:{}, adminAuditLog:[],
+    adminGroups:[], adminGroupMembers:[], groupMembersModalFor:null,
     accessTreeExpanded:{}, accessTreeSelected:null, addAccessLevel:'view', authError:'' };
   render();
 }
@@ -812,7 +818,7 @@ async function loadAdminData(){
 
   if(state.companies.length === 0) await loadCompanies();
 
-  const { data: pcRows } = await sb.from('profile_companies').select('id, profile_id, company_id, level, scope');
+  const { data: pcRows } = await sb.from('profile_companies').select('id, profile_id, group_id, company_id, level, scope');
   state.adminProfileCompanyRows = pcRows || [];
 
   const { data: ucapRows } = await sb.from('user_company_access_processes').select('user_company_access_id, process_id');
@@ -828,10 +834,21 @@ async function loadAdminData(){
     .order('created_at', { ascending:false })
     .limit(200);
   state.adminAuditLog = auditRows || [];
+
+  const { data: groupRows } = await sb.from('groups').select('id, name, created_at').order('name');
+  state.adminGroups = groupRows || [];
+
+  const { data: memberRows } = await sb.from('group_members').select('id, group_id, profile_id');
+  state.adminGroupMembers = memberRows || [];
 }
 function findProfileLabel(profileId){
+  if(!profileId) return '—';
   const u = state.adminUsers.find(x=>x.id===profileId) || state.adminPending.find(x=>x.id===profileId);
   return u ? (u.full_name || u.email || profileId) : profileId;
+}
+function groupLabel(groupId){
+  const g = state.adminGroups.find(x=>x.id===groupId);
+  return g ? g.name : groupId;
 }
 async function logAudit(targetId, action, oldValue, newValue){
   await sb.from('audit_log').insert({
@@ -912,10 +929,10 @@ function getGrantsForSelectedNode(){
   state.adminProfileCompanyRows.forEach(r=>{
     if(r.company_id !== sel.companyId) return;
     if(r.scope === 'all'){
-      result.push({ row:r, profileId:r.profile_id, level:r.level });
+      result.push({ row:r, profileId:r.profile_id, groupId:r.group_id, level:r.level });
     } else if(sel.type === 'process' && r.scope === 'specific'){
       const pids = state.adminUcapMap[r.id] || [];
-      if(pids.includes(sel.processId)) result.push({ row:r, profileId:r.profile_id, level:r.level });
+      if(pids.includes(sel.processId)) result.push({ row:r, profileId:r.profile_id, groupId:r.group_id, level:r.level });
     }
   });
   return result;
@@ -927,7 +944,9 @@ async function removeNodeAccess(profileCompanyRowId){
   if(error){ showError(error.message); return; }
   if(row){
     const pids = state.adminUcapMap[row.id] || [];
-    await logAudit(row.profile_id, 'company_access_revoked', summarizeGrant(row.company_id, row.level, row.scope, pids), null);
+    const summary = summarizeGrant(row.company_id, row.level, row.scope, pids);
+    const label = row.group_id ? `Group: ${groupLabel(row.group_id)} — ${summary}` : summary;
+    await logAudit(row.profile_id, 'company_access_revoked', label, null);
   }
   toast('Access removed.');
   await loadAdminData(); render();
@@ -935,16 +954,23 @@ async function removeNodeAccess(profileCompanyRowId){
 async function addAccessToSelectedNode(){
   const sel = state.accessTreeSelected;
   if(!sel) return;
-  const userSelect = document.getElementById('add-access-user');
-  const userId = userSelect ? userSelect.value : '';
-  if(!userId){ toast('Please choose a user first.'); return; }
+  const granteeSelect = document.getElementById('add-access-grantee');
+  const granteeValue = granteeSelect ? granteeSelect.value : '';
+  if(!granteeValue){ toast('Please choose a user or group first.'); return; }
+  const sepIdx = granteeValue.indexOf(':');
+  const kind = granteeValue.slice(0, sepIdx);
+  const granteeId = granteeValue.slice(sepIdx + 1);
+  const isGroup = kind === 'group';
   // Read exactly once, right here — nothing else touches this value before
   // it's written below, for either the update or the insert path.
   const level = state.addAccessLevel;
 
-  const existing = state.adminProfileCompanyRows.find(r=> r.profile_id===userId && r.company_id===sel.companyId);
+  const existing = state.adminProfileCompanyRows.find(r=> isGroup
+    ? (r.group_id===granteeId && r.company_id===sel.companyId)
+    : (r.profile_id===granteeId && r.company_id===sel.companyId));
   const existingPids = existing ? (state.adminUcapMap[existing.id] || []) : [];
-  const beforeLabel = existing ? summarizeGrant(sel.companyId, existing.level, existing.scope, existingPids) : null;
+  const granteePrefix = isGroup ? `Group: ${groupLabel(granteeId)} — ` : '';
+  const beforeLabel = existing ? (granteePrefix + summarizeGrant(sel.companyId, existing.level, existing.scope, existingPids)) : null;
 
   let newScope, newProcessIds;
   if(sel.type === 'company' || (existing && existing.scope === 'all')){
@@ -964,8 +990,11 @@ async function addAccessToSelectedNode(){
     const { error: delUcapErr } = await sb.from('user_company_access_processes').delete().eq('user_company_access_id', rowId);
     if(delUcapErr){ showError(delUcapErr.message); return; }
   } else {
+    const insertPayload = isGroup
+      ? { group_id:granteeId, company_id:sel.companyId, level, scope:newScope }
+      : { profile_id:granteeId, company_id:sel.companyId, level, scope:newScope };
     const { data, error } = await sb.from('profile_companies')
-      .insert({ profile_id:userId, company_id:sel.companyId, level, scope:newScope }).select('id').single();
+      .insert(insertPayload).select('id').single();
     if(error){ showError(error.message); return; }
     rowId = data.id;
   }
@@ -975,7 +1004,7 @@ async function addAccessToSelectedNode(){
     if(ucapErr){ showError(ucapErr.message); return; }
   }
 
-  await logAudit(userId, 'company_access_granted', beforeLabel, summarizeGrant(sel.companyId, level, newScope, newProcessIds));
+  await logAudit(isGroup ? null : granteeId, 'company_access_granted', beforeLabel, granteePrefix + summarizeGrant(sel.companyId, level, newScope, newProcessIds));
 
   toast('Access added.');
   state.addAccessLevel = 'view';
@@ -1200,16 +1229,19 @@ function renderAdmin(){
         <div class="tab ${state.adminTab==='pending'?'active':''}" onclick="setAdminTab('pending')">Pending requests (${state.adminPending.length})</div>
         <div class="tab ${state.adminTab==='users'?'active':''}" onclick="setAdminTab('users')">Users</div>
         <div class="tab ${state.adminTab==='permissions'?'active':''}" onclick="setAdminTab('permissions')">Permissions</div>
+        <div class="tab ${state.adminTab==='groups'?'active':''}" onclick="setAdminTab('groups')">Groups</div>
         <div class="tab ${state.adminTab==='audit'?'active':''}" onclick="setAdminTab('audit')">Audit Log</div>
         <div class="tab ${state.adminTab==='depts'?'active':''}" onclick="setAdminTab('depts')">Departments</div>
       </div>
       ${state.adminTab==='pending' ? renderAdminPending() : ''}
       ${state.adminTab==='users' ? renderAdminUsers() : ''}
       ${state.adminTab==='permissions' ? renderAdminPermissions() : ''}
+      ${state.adminTab==='groups' ? renderAdminGroups() : ''}
       ${state.adminTab==='audit' ? renderAdminAuditLog() : ''}
       ${state.adminTab==='depts' ? renderAdminDepts() : ''}
     </div>
-  </div>`;
+  </div>
+  ${state.groupMembersModalFor ? renderGroupMembersModal() : ''}`;
 }
 function renderAdminPending(){
   if(state.adminPending.length===0) return `<div class="empty-note">No pending requests.</div>`;
@@ -1302,10 +1334,17 @@ function renderAccessNodeUsers(){
   return `<div>
     <div class="subblock-title" style="margin-bottom:10px;">Access to: ${escapeHtml(label)}</div>
     ${grants.length===0 ? `<div class="empty-note">No one has access here yet.</div>` : grants.map(g=>{
-      const u = state.adminUsers.find(x=>x.id===g.profileId);
-      const name = u ? (u.full_name || u.email || g.profileId) : g.profileId;
+      const isGroup = !!g.groupId;
+      let name;
+      if(isGroup){
+        name = groupLabel(g.groupId);
+      } else {
+        const u = state.adminUsers.find(x=>x.id===g.profileId);
+        name = u ? (u.full_name || u.email || g.profileId) : g.profileId;
+      }
       return `<div class="access-user-row">
         <span class="access-user-name">${escapeHtml(name)}</span>
+        ${isGroup ? `<span class="group-tag">Group</span>` : ''}
         <span class="level-badge ${g.level==='edit'?'edit':'view'}">${g.level==='edit'?'Editor':'Viewer'}</span>
         <button class="icon-btn" onclick="removeNodeAccess('${g.row.id}')">✕</button>
       </div>`;
@@ -1316,15 +1355,17 @@ function renderAddAccessPanel(){
   const sel = state.accessTreeSelected;
   if(!sel) return `<div class="card"><div class="empty-note">Select a company or mega-cycle on the left first.</div></div>`;
   const label = sel.type==='company' ? companyLabel(sel.companyId) : `${companyLabel(sel.companyId)} — ${processLabel(sel.companyId, sel.processId)}`;
-  const candidates = state.adminUsers.filter(u=>u.role!=='admin');
+  const userCandidates = state.adminUsers.filter(u=>u.role!=='admin');
+  const groupCandidates = state.adminGroups;
   return `<div class="card">
     <div class="card-title" style="margin-bottom:4px;">Add access</div>
     <div class="card-hint" style="margin-bottom:14px;">${escapeHtml(label)}</div>
     <div class="field">
-      <label>User</label>
-      <select id="add-access-user">
-        <option value="">— choose a user —</option>
-        ${candidates.map(u=>`<option value="${u.id}">${escapeHtml(u.full_name || u.email || u.id)}</option>`).join('')}
+      <label>User or group</label>
+      <select id="add-access-grantee">
+        <option value="">— choose —</option>
+        ${userCandidates.length ? `<optgroup label="Users">${userCandidates.map(u=>`<option value="user:${u.id}">${escapeHtml(u.full_name || u.email || u.id)}</option>`).join('')}</optgroup>` : ''}
+        ${groupCandidates.length ? `<optgroup label="Groups">${groupCandidates.map(g=>`<option value="group:${g.id}">${escapeHtml(g.name)} (Group)</option>`).join('')}</optgroup>` : ''}
       </select>
     </div>
     <div class="field">
@@ -1367,6 +1408,84 @@ function renderAdminDepts(){
     <table class="admin-table"><thead><tr><th>Department</th></tr></thead><tbody>
       ${state.departments.map(d=>`<tr><td>${escapeHtml(d.name)}</td></tr>`).join('')}
     </tbody></table>`;
+}
+
+/* ---------- Groups tab ---------- */
+function groupMemberCount(groupId){
+  return state.adminGroupMembers.filter(m=>m.group_id===groupId).length;
+}
+async function createGroup(name){
+  const trimmed = (name||'').trim();
+  if(!trimmed){ toast('Please enter a group name.'); return; }
+  const { error } = await sb.from('groups').insert({ name: trimmed });
+  if(error){ showError(error.message); return; }
+  toast('Group created.');
+  await loadAdminData(); render();
+}
+function openGroupMembersModal(groupId){
+  state.groupMembersModalFor = groupId;
+  render();
+}
+function closeGroupMembersModal(){
+  state.groupMembersModalFor = null;
+  render();
+}
+async function addGroupMember(){
+  const groupId = state.groupMembersModalFor;
+  if(!groupId) return;
+  const select = document.getElementById('group-member-add-user');
+  const profileId = select ? select.value : '';
+  if(!profileId){ toast('Please choose a user first.'); return; }
+  const { error } = await sb.from('group_members').insert({ group_id: groupId, profile_id: profileId });
+  if(error){ showError(error.message); return; }
+  await loadAdminData(); render();
+}
+async function removeGroupMember(memberRowId){
+  const { error } = await sb.from('group_members').delete().eq('id', memberRowId);
+  if(error){ showError(error.message); return; }
+  await loadAdminData(); render();
+}
+function renderAdminGroups(){
+  return `<div class="inline-form">
+      <input type="text" id="new-group-name" placeholder="New group, e.g. Engineering">
+      <button class="btn btn-primary" onclick="createGroup(document.getElementById('new-group-name').value); document.getElementById('new-group-name').value='';">+ Create group</button>
+    </div>
+    ${state.adminGroups.length===0 ? `<div class="empty-note">No groups yet.</div>` : `<table class="admin-table"><thead><tr>
+      <th>Group</th><th>Members</th><th></th>
+    </tr></thead><tbody>
+    ${state.adminGroups.map(g=>`
+      <tr>
+        <td>${escapeHtml(g.name)}</td>
+        <td>${groupMemberCount(g.id)}</td>
+        <td><button class="btn btn-ghost" onclick="openGroupMembersModal('${g.id}')">Manage members</button></td>
+      </tr>
+    `).join('')}
+    </tbody></table>`}`;
+}
+function renderGroupMembersModal(){
+  const g = state.adminGroups.find(x=>x.id===state.groupMembersModalFor);
+  if(!g) return '';
+  const members = state.adminGroupMembers.filter(m=>m.group_id===g.id);
+  const memberProfileIds = new Set(members.map(m=>m.profile_id));
+  const candidates = state.adminUsers.filter(u=>!memberProfileIds.has(u.id));
+  return `<div class="modal-overlay" onclick="if(event.target===this) closeGroupMembersModal()">
+    <div class="modal" style="width:460px;">
+      <h3 style="margin-bottom:14px;">${escapeHtml(g.name)} — members</h3>
+      ${members.length===0 ? `<div class="empty-note">No members yet.</div>` : `<div style="display:flex; flex-direction:column; gap:2px; margin-bottom:14px;">${members.map(m=>`
+        <div class="row-input" style="padding:6px 0; border-bottom:1px solid var(--gray-100);">
+          <span style="flex:1; font-size:13.5px;">${escapeHtml(findProfileLabel(m.profile_id))}</span>
+          <button class="icon-btn" onclick="removeGroupMember('${m.id}')">✕</button>
+        </div>`).join('')}</div>`}
+      <div class="row-input">
+        <select id="group-member-add-user">
+          <option value="">— choose a user —</option>
+          ${candidates.map(u=>`<option value="${u.id}">${escapeHtml(u.full_name || u.email || u.id)}</option>`).join('')}
+        </select>
+        <button class="btn btn-primary" style="flex-shrink:0;" onclick="addGroupMember()">Add</button>
+      </div>
+      <button class="btn btn-ghost" style="width:100%; margin-top:16px;" onclick="closeGroupMembersModal()">Close</button>
+    </div>
+  </div>`;
 }
 
 /* ---------- editor rendering (left panel + right tree) ---------- */
