@@ -88,6 +88,8 @@
     display:flex; justify-content:space-between; align-items:center; gap:10px; }
   .sp-row:hover:not(.sel){ background:var(--gray-200); color:var(--gray-700); }
   .sp-row.sel{ background:var(--gray-700); border-color:var(--gray-700); color:#fff; }
+  .company-process-row{ background:#fff; }
+  .sp-row.company-process-row:hover{ background:var(--violet-light); }
   .subblock{ border-left:3px solid var(--violet-light); padding-left:12px; margin-bottom:14px; }
   .subblock-title{ font-weight:700; font-size:13px; color:var(--navy); margin-bottom:8px; }
   .step-line{ display:flex; align-items:center; gap:8px; padding:7px 0; border-bottom:1px dashed var(--gray-200); }
@@ -832,7 +834,7 @@ function renderCompanyMegaCycles(c){
       ${c.processes.map(p=>{
         const subs = p.subprocesses || [];
         const doneCount = subs.filter(sp=> sp.l3_locked && (sp.steps||[]).filter(st=>st.classification==='critical').every(st=>st.l4_locked)).length;
-        return `<div class="sp-row" onclick="openEditor('${p.id}')" style="background:#fff;">
+        return `<div class="sp-row company-process-row" onclick="openEditor('${p.id}')">
           <span>${escapeHtml(p.l1_name)}</span>
           <span style="font-size:11px; font-weight:600; opacity:.85;">${subs.length>0 ? `${doneCount}/${subs.length} sub-processes complete` : (p.l2_locked ? 'in progress' : 'not started')}</span>
         </div>`;
