@@ -466,16 +466,23 @@ function getCriticalSteps(){
 }
 
 /* --- text edits (debounced db write, no full re-render) --- */
+function refreshSaveButton(btnId, enabled){
+  const btn = document.getElementById(btnId);
+  if(btn) btn.disabled = !enabled;
+}
 function onSubName(spId, v){
   findSp(spId).name = v; updateEditorTree();
+  refreshSaveButton('l2-save-btn', state.editorProcess.subprocesses.some(s=>s.name.trim()));
   debounced('sp-'+spId, ()=> sb.from('subprocesses').update({ name:v }).eq('id', spId));
 }
 function onStepText(spId, stepId, v){
   findStep(spId, stepId).text = v; updateEditorTree();
+  refreshSaveButton('l3-save-btn', findSp(spId).steps.some(s=>s.text.trim()));
   debounced('step-'+stepId, ()=> sb.from('steps').update({ text:v }).eq('id', stepId));
 }
 function onTaskText(spId, stepId, taskId, v){
   findTask(spId, stepId, taskId).text = v; updateEditorTree();
+  refreshSaveButton('l4-save-btn', findStep(spId, stepId).tasks.some(t=>t.text.trim()));
   debounced('task-'+taskId, ()=> sb.from('tasks').update({ text:v }).eq('id', taskId));
 }
 function onWI(spId, stepId, taskId, wiId, field, v){
@@ -866,18 +873,21 @@ function renderCompanySettingsModal(){
   if(!c) return '';
   return `<div class="modal-overlay" onclick="if(event.target===this) closeCompanySettings()">
     <div class="modal" style="width:460px;">
-      <h3>${escapeHtml(c.name)} — mega-cycles</h3>
-      ${c.processes.length===0 ? `<div class="empty-note">No mega-cycles yet.</div>` : c.processes.map(p=>`
-        <div class="row-input">
+      <h3 style="margin-bottom:2px;">${escapeHtml(c.name)}</h3>
+      <p style="margin:0 0 16px; font-size:12px; color:var(--gray-500); font-weight:600; text-transform:uppercase; letter-spacing:.03em;">Mega-cycles</p>
+      ${c.processes.length===0 ? `<div class="empty-note">No mega-cycles yet.</div>` : `<div style="display:flex; flex-direction:column; gap:2px;">${c.processes.map(p=>`
+        <div class="row-input" style="padding:6px 0; border-bottom:1px solid var(--gray-100);">
           <span style="flex:1; font-size:13.5px;">${escapeHtml(p.l1_name)}</span>
           <button class="icon-btn" onclick="removeProcessFromCompany('${p.id}')">✕</button>
-        </div>`).join('')}
-      <div class="row-input" style="margin-top:10px;">
+        </div>`).join('')}</div>`}
+      <div class="row-input" style="margin-top:14px;">
         <input type="text" id="cs-new-process-name" placeholder="New mega-cycle name">
         <button class="btn btn-primary" style="flex-shrink:0;" onclick="addProcessToCompany('${c.id}', document.getElementById('cs-new-process-name').value); document.getElementById('cs-new-process-name').value='';">Add</button>
       </div>
-      <button class="btn btn-danger" style="margin-top:18px; width:100%;" onclick="deleteCompany('${c.id}')">Delete company</button>
-      <button class="link-btn" style="margin-top:10px;" onclick="closeCompanySettings()">Close</button>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:22px; padding-top:14px; border-top:1px solid var(--gray-200);">
+        <button class="link-btn" style="color:var(--red); padding:0;" onclick="deleteCompany('${c.id}')">Delete company</button>
+        <button class="btn btn-ghost" onclick="closeCompanySettings()">Close</button>
+      </div>
     </div>
   </div>`;
 }
@@ -1026,7 +1036,7 @@ function renderEditorLeftPanel(){
       </div>`;
     });
   }
-  html += `<button class="lock-btn ${p.l2_locked?'done-btn':''}" ${p.l2_locked ? '' : (!p.subprocesses.some(s=>s.name.trim()) ? 'disabled':'')} onclick="${p.l2_locked?'unlockL2()':'lockL2()'}">${p.l2_locked?'✓ Saved — click to edit':'Save L2 → go to L3'}</button>
+  html += `<button id="l2-save-btn" class="lock-btn ${p.l2_locked?'done-btn':''}" ${p.l2_locked ? '' : (!p.subprocesses.some(s=>s.name.trim()) ? 'disabled':'')} onclick="${p.l2_locked?'unlockL2()':'lockL2()'}">${p.l2_locked?'✓ Saved — click to edit':'Save L2 → go to L3'}</button>
   </div>`;
 
   /* ---------- L3: steps of the selected sub-process ---------- */
@@ -1048,7 +1058,7 @@ function renderEditorLeftPanel(){
       });
       html += `<button class="link-btn" onclick="addStep('${selSp.id}')">+ add step</button>`;
       const hasAnyStep = selSp.steps.some(s=>s.text.trim());
-      html += `<button class="lock-btn" ${!hasAnyStep ? 'disabled':''} onclick="lockL3ForSp('${selSp.id}')">Save L3 → classify &amp; select a step</button>`;
+      html += `<button id="l3-save-btn" class="lock-btn" ${!hasAnyStep ? 'disabled':''} onclick="lockL3ForSp('${selSp.id}')">Save L3 → classify &amp; select a step</button>`;
     } else {
       html += `<div class="empty-note" style="margin-bottom:8px;">Classify each step, then click one to work on its tasks in L4.</div>`;
       selSp.steps.forEach(st=>{
@@ -1094,7 +1104,7 @@ function renderEditorLeftPanel(){
       });
       html += `<button class="link-btn" onclick="addTask('${selSp.id}','${selStep.id}')">+ add task</button>`;
       const hasAnyTask = selStep.tasks.some(t=>t.text.trim());
-      html += `<button class="lock-btn" ${!hasAnyTask ? 'disabled':''} onclick="lockL4ForStep('${selSp.id}','${selStep.id}')">Save L4 → select a task for L5</button>`;
+      html += `<button id="l4-save-btn" class="lock-btn" ${!hasAnyTask ? 'disabled':''} onclick="lockL4ForStep('${selSp.id}','${selStep.id}')">Save L4 → select a task for L5</button>`;
     } else {
       html += `<div class="empty-note" style="margin-bottom:8px;">Click a task to work on its work instructions in L5.</div>`;
       selStep.tasks.forEach(task=>{
