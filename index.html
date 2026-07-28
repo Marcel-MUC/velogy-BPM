@@ -764,9 +764,9 @@ function render(){
 function renderHeader(activeLabel){
   const roleClass = state.profile.role==='admin' ? 'pill-admin' : (state.profile.role==='process_owner' ? 'pill-owner' : 'pill-viewer');
   return `<div class="header">
-    <div class="brand">
+    <div class="brand" style="cursor:pointer;" onclick="backToCompanies()" title="Back to companies">
       <div class="logo">▶</div>
-      <div><h1>Velogy — Process Capture</h1><p>Layer-by-layer process capture · Phase 1 tool for Process Owners</p></div>
+      <div><h1>Velogy — Process Capture</h1><p>Phase 1 tool for Process Owners</p></div>
     </div>
     <div class="actions">
       <span class="pill ${roleClass}">${escapeHtml(state.profile.role)}</span>
