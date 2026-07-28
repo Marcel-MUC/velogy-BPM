@@ -395,7 +395,7 @@ async function openEditor(processId){
       companies ( name ),
       subprocesses ( id, name, position, l3_locked, l4_locked,
         steps ( id, text, position, l4_locked,
-          tasks ( id, text, position,
+          tasks ( id, text, position, l5_locked,
             work_instructions ( id, transaction, field, tool, position )
           )
         )
@@ -473,6 +473,7 @@ function onTaskText(spId, stepId, taskId, v){
 function onWI(spId, stepId, taskId, wiId, field, v){
   const wi = findTask(spId, stepId, taskId).work_instructions.find(w=>w.id===wiId);
   wi[field] = v; updateEditorTree();
+  refreshSaveButton('l5-save-btn', findTask(spId, stepId, taskId).work_instructions.some(w=>w.transaction.trim()||w.field.trim()||w.tool.trim()));
   debounced('wi-'+wiId+'-'+field, ()=> sb.from('work_instructions').update({ [field]:v }).eq('id', wiId));
 }
 
@@ -580,6 +581,18 @@ async function lockL4ForStep(spId, stepId){
 async function unlockL4ForStep(spId, stepId){
   await sb.from('steps').update({ l4_locked:false }).eq('id', stepId);
   findStep(spId, stepId).l4_locked = false; renderEditor();
+}
+async function lockL5ForTask(spId, stepId, taskId){
+  const task = findTask(spId, stepId, taskId);
+  if(!task.work_instructions.some(wi=>wi.transaction.trim()||wi.field.trim()||wi.tool.trim())) return;
+  const { error } = await sb.from('tasks').update({ l5_locked:true }).eq('id', taskId);
+  if(error){ toast(error.message); return; }
+  task.l5_locked = true;
+  renderEditor();
+}
+async function unlockL5ForTask(spId, stepId, taskId){
+  await sb.from('tasks').update({ l5_locked:false }).eq('id', taskId);
+  findTask(spId, stepId, taskId).l5_locked = false; renderEditor();
 }
 
 /* ================= EXCEL EXPORT ================= */
@@ -979,6 +992,13 @@ function renderEditor(){
   updateEditorTree();
 }
 
+function renderSavedRow(unlockCall){
+  return `<div style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+    <div class="lock-btn done-btn" style="flex:1; margin-top:0; cursor:default;">✓ Saved</div>
+    <button class="btn btn-ghost" style="flex-shrink:0;" onclick="${unlockCall}">Edit</button>
+  </div>`;
+}
+
 function renderEditorLeftPanel(){
   const p = state.editorProcess;
   const selSp = p.l2_locked ? (p.subprocesses.find(s=>s.id===state.editorSelectedSpId) || null) : null;
@@ -988,7 +1008,7 @@ function renderEditorLeftPanel(){
   const c2 = p.l2_locked ? 'done' : 'active';
   const c3 = !p.l2_locked ? 'disabled' : (!selSp ? 'disabled' : (selSp.l3_locked ? 'done' : 'active'));
   const c4 = (!selSp || !selSp.l3_locked) ? 'disabled' : (!selStep ? 'disabled' : (selStep.l4_locked ? 'done' : 'active'));
-  const c5 = (!selStep || selStep.l4_locked!==true) ? 'disabled' : (selTask ? 'active' : 'disabled');
+  const c5 = (!selStep || selStep.l4_locked!==true) ? 'disabled' : (!selTask ? 'disabled' : (selTask.l5_locked ? 'done' : 'active'));
 
   let html = '';
 
@@ -1015,8 +1035,10 @@ function renderEditorLeftPanel(){
       </div>`;
     });
   }
-  html += `<button id="l2-save-btn" class="lock-btn ${p.l2_locked?'done-btn':''}" ${p.l2_locked ? '' : (!p.subprocesses.some(s=>s.name.trim()) ? 'disabled':'')} onclick="${p.l2_locked?'unlockL2()':'lockL2()'}">${p.l2_locked?'✓ Saved — click to edit':'Save L2 → go to L3'}</button>
-  </div>`;
+  html += p.l2_locked
+    ? renderSavedRow('unlockL2()')
+    : `<button id="l2-save-btn" class="lock-btn" ${!p.subprocesses.some(s=>s.name.trim()) ? 'disabled':''} onclick="lockL2()">Save L2 → go to L3</button>`;
+  html += `</div>`;
 
   /* ---------- L3: steps of the selected sub-process ---------- */
   html += `<div class="card ${c3}">
@@ -1049,7 +1071,7 @@ function renderEditorLeftPanel(){
           <span style="font-size:11px; font-weight:600; opacity:.85; white-space:nowrap;">${badge}</span>
         </div>`;
       });
-      html += `<button class="lock-btn done-btn" onclick="unlockL3ForSp('${selSp.id}')">✓ Saved — click to edit steps</button>`;
+      html += renderSavedRow(`unlockL3ForSp('${selSp.id}')`);
     }
   }
   html += `</div>`;
@@ -1083,7 +1105,7 @@ function renderEditorLeftPanel(){
           <span style="font-size:11px; font-weight:600; opacity:.85;">${isSel ? 'currently editing' : (hasWI ? '✓ has instructions' : 'needs instructions')}</span>
         </div>`;
       });
-      html += `<button class="lock-btn done-btn" onclick="unlockL4ForStep('${selSp.id}','${selStep.id}')">✓ Saved — click to edit tasks</button>`;
+      html += renderSavedRow(`unlockL4ForStep('${selSp.id}','${selStep.id}')`);
     }
   }
   html += `</div>`;
@@ -1101,13 +1123,19 @@ function renderEditorLeftPanel(){
     if(selTask.work_instructions.length===0) html += `<div class="empty-note">No work instructions yet.</div>`;
     selTask.work_instructions.forEach(wi=>{
       html += `<div class="wi-row">
-        <input type="text" placeholder="Transaction" value="${escapeHtml(wi.transaction)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','transaction', this.value)">
-        <input type="text" placeholder="Field" value="${escapeHtml(wi.field)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','field', this.value)">
-        <input type="text" placeholder="Tool" value="${escapeHtml(wi.tool)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','tool', this.value)">
-        <button class="icon-btn" onclick="removeWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}')">✕</button>
+        <input type="text" placeholder="Transaction" value="${escapeHtml(wi.transaction)}" ${selTask.l5_locked?'disabled':''} oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','transaction', this.value)">
+        <input type="text" placeholder="Field" value="${escapeHtml(wi.field)}" ${selTask.l5_locked?'disabled':''} oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','field', this.value)">
+        <input type="text" placeholder="Tool" value="${escapeHtml(wi.tool)}" ${selTask.l5_locked?'disabled':''} oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','tool', this.value)">
+        ${selTask.l5_locked ? '<span></span>' : `<button class="icon-btn" onclick="removeWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}')">✕</button>`}
       </div>`;
     });
-    html += `<button class="link-btn" onclick="addWI('${selSp.id}','${selStep.id}','${selTask.id}')">+ add work instruction</button>`;
+    if(!selTask.l5_locked){
+      html += `<button class="link-btn" onclick="addWI('${selSp.id}','${selStep.id}','${selTask.id}')">+ add work instruction</button>`;
+      const hasAnyWI = selTask.work_instructions.some(wi=>wi.transaction.trim()||wi.field.trim()||wi.tool.trim());
+      html += `<button id="l5-save-btn" class="lock-btn" ${!hasAnyWI ? 'disabled':''} onclick="lockL5ForTask('${selSp.id}','${selStep.id}','${selTask.id}')">Save L5</button>`;
+    } else {
+      html += renderSavedRow(`unlockL5ForTask('${selSp.id}','${selStep.id}','${selTask.id}')`);
+    }
   }
   html += `</div>`;
 
