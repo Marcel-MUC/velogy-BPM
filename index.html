@@ -173,12 +173,23 @@
 
   .modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:flex; align-items:center;
     justify-content:center; z-index:40; }
+  .modal-overlay.blur{ backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); }
   .modal{ background:#fff; border-radius:14px; padding:24px; width:380px; max-width:92vw; }
   .modal h3{ margin:0 0 16px; font-size:16px; }
 
   .toast{ position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--gray-900); color:#fff;
     padding:10px 18px; border-radius:8px; font-size:13px; opacity:0; pointer-events:none; transition:opacity .25s ease; z-index:50; }
   .toast.show{ opacity:1; }
+
+  .error-toast-stack{ position:fixed; top:20px; right:20px; z-index:60; display:flex; flex-direction:column;
+    gap:10px; max-width:360px; }
+  .error-toast{ background:#fff; border-radius:14px; box-shadow:0 8px 24px rgba(20,15,50,.15);
+    border-left:4px solid var(--red); padding:14px 16px; display:flex; align-items:flex-start; gap:10px;
+    font-size:13px; color:var(--gray-900); opacity:0; transform:translateX(12px);
+    transition:opacity .25s ease, transform .25s ease; }
+  .error-toast.show{ opacity:1; transform:translateX(0); }
+  .error-toast .error-toast-icon{ color:var(--red); font-size:16px; flex-shrink:0; line-height:1.3; }
+  .error-toast .error-toast-msg{ flex:1; white-space:pre-wrap; line-height:1.4; word-break:break-word; }
 </style>
 </head>
 <body>
@@ -224,25 +235,65 @@ function escapeHtml(s){
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-/* ================= VISIBLE ERROR BANNER (temporary debug aid) ================= */
+/* ================= ERROR NOTIFICATIONS (top-right, auto-dismiss) ================= */
 window.addEventListener('error', function(e){
-  showErrorBanner('JS ERROR: ' + e.message + ' — ' + (e.filename||'') + ':' + e.lineno + ':' + e.colno + '\n' + (e.error && e.error.stack ? e.error.stack : ''));
+  showError('Unexpected error: ' + e.message);
 });
 window.addEventListener('unhandledrejection', function(e){
-  showErrorBanner('PROMISE ERROR: ' + (e.reason && e.reason.message ? e.reason.message : e.reason) + '\n' + (e.reason && e.reason.stack ? e.reason.stack : ''));
+  showError('Unexpected error: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
 });
-function showErrorBanner(text){
-  let banner = document.getElementById('debug-error-banner');
-  if(!banner){
-    banner = document.createElement('div');
-    banner.id = 'debug-error-banner';
-    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:14px 20px;font-family:ui-monospace,Menlo,monospace;font-size:12px;z-index:99999;white-space:pre-wrap;max-height:40vh;overflow:auto;box-shadow:0 4px 12px rgba(0,0,0,.3);';
-    document.body.appendChild(banner);
+function showError(message){
+  let stack = document.getElementById('error-toast-stack');
+  if(!stack){
+    stack = document.createElement('div');
+    stack.id = 'error-toast-stack';
+    stack.className = 'error-toast-stack';
+    document.body.appendChild(stack);
   }
-  const entry = document.createElement('div');
-  entry.style.cssText = 'border-top:1px solid rgba(255,255,255,.3); padding-top:8px; margin-top:8px;';
-  entry.textContent = new Date().toLocaleTimeString() + '  ' + text;
-  banner.appendChild(entry);
+  const el = document.createElement('div');
+  el.className = 'error-toast';
+  const icon = document.createElement('span');
+  icon.className = 'error-toast-icon';
+  icon.textContent = '⚠';
+  const msgEl = document.createElement('span');
+  msgEl.className = 'error-toast-msg';
+  msgEl.textContent = message;
+  el.appendChild(icon); el.appendChild(msgEl);
+  stack.prepend(el);
+  requestAnimationFrame(()=> el.classList.add('show'));
+  setTimeout(()=>{
+    el.classList.remove('show');
+    setTimeout(()=> el.remove(), 250);
+  }, 5000);
+}
+
+/* ================= CUSTOM CONFIRM DIALOG ================= */
+function showConfirm(message){
+  return new Promise(resolve=>{
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay blur';
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    const msgEl = document.createElement('p');
+    msgEl.style.cssText = 'margin:0 0 20px; font-size:14px; color:var(--gray-900); line-height:1.5;';
+    msgEl.textContent = message;
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex; gap:10px; justify-content:flex-end;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-ghost';
+    cancelBtn.textContent = 'Cancel';
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'btn btn-danger';
+    confirmBtn.textContent = 'Confirm';
+    actions.appendChild(cancelBtn); actions.appendChild(confirmBtn);
+    modal.appendChild(msgEl); modal.appendChild(actions);
+    overlay.appendChild(modal);
+    function finish(result){ overlay.remove(); resolve(result); }
+    overlay.addEventListener('click', e=>{ if(e.target === overlay) finish(false); });
+    cancelBtn.addEventListener('click', ()=> finish(false));
+    confirmBtn.addEventListener('click', ()=> finish(true));
+    document.body.appendChild(overlay);
+  });
 }
 
 function toast(msg){
@@ -353,7 +404,7 @@ async function loadDepartments(){
 async function createDepartment(name){
   if(!name.trim()) return;
   const { error } = await sb.from('departments').insert({ name: name.trim() });
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   toast('Department created.');
   await loadDepartments(); render();
 }
@@ -362,7 +413,7 @@ async function loadCompanies(){
   const { data, error } = await sb.from('companies')
     .select('id, name, created_at, processes(id, l1_name, l2_locked, created_at, subprocesses(l3_locked, steps(l4_locked)))')
     .order('name');
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   (data||[]).forEach(c=>{ c.processes = (c.processes||[]).sort((a,b)=> a.l1_name.localeCompare(b.l1_name)); });
   state.companies = data || [];
 }
@@ -383,7 +434,7 @@ async function submitNewCompany(name){
   if(!name || !name.trim()){ toast('Please enter a company name.'); return; }
   const names = state.newCompanyProcessNames.map(n=>n.trim()).filter(Boolean);
   const { error } = await sb.rpc('create_company_with_processes', { p_name: name.trim(), p_process_names: names });
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   state.showNewCompanyModal = false;
   toast('Company created.');
   await loadCompanies(); render();
@@ -395,7 +446,7 @@ async function addProcessToCompany(companyId, name){
   const { error } = await sb.from('processes')
     .insert({ l1_name: name.trim(), company_id: companyId, created_by: state.profile.id, l1_locked:true })
     .select().single();
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   toast('Process added.');
   await loadCompanies(); render();
 }
@@ -408,9 +459,9 @@ async function deleteCompany(companyId){
     : hasData
       ? `Delete "${c.name}"? This will permanently remove all ${c.processes.length} mega-cycle(s) and all captured data (sub-processes, steps, tasks, work instructions) inside them. This cannot be undone.`
       : `Delete "${c.name}"? This will permanently remove its ${c.processes.length} mega-cycle(s). This cannot be undone.`;
-  if(!window.confirm(msg)) return;
+  if(!await showConfirm(msg)) return;
   const { error } = await sb.rpc('delete_company', { p_company_id: companyId });
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   state.companySettingsFor = null;
   state.expandedCompanyId = null;
   toast('Company deleted.');
@@ -422,9 +473,9 @@ async function removeProcessFromCompany(processId){
   const msg = hasData
     ? 'This mega-cycle already has captured data (sub-processes, steps, tasks, or work instructions). Deleting it will permanently remove all of it. Continue?'
     : 'Delete this mega-cycle?';
-  if(!window.confirm(msg)) return;
+  if(!await showConfirm(msg)) return;
   const { error } = await sb.from('processes').delete().eq('id', processId);
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   toast('Mega-cycle removed.');
   await loadCompanies(); render();
 }
@@ -443,7 +494,7 @@ async function openEditor(processId){
         )
       )
     `).eq('id', processId).single();
-  if(error){ toast(error.message); state.screen = 'companies'; render(); return; }
+  if(error){ showError(error.message); state.screen = 'companies'; render(); return; }
   data.subprocesses = data.subprocesses || [];
   data.subprocesses.forEach(sp=>{
     sp.steps = sp.steps || [];
@@ -500,12 +551,12 @@ function refreshSaveButton(btnId, enabled){
 function reportSaveResult(error, data){
   if(error){
     console.error('Debounced save failed:', error);
-    toast('Save failed: ' + error.message);
+    showError('Save failed: ' + error.message);
     return;
   }
   if(!data || data.length===0){
     console.warn('Debounced save affected 0 rows — check RLS policies.', data);
-    toast('Save did not apply — check permissions.');
+    showError('Save did not apply — check permissions.');
   }
 }
 function onSubName(spId, v){
@@ -546,13 +597,13 @@ function onWI(spId, stepId, taskId, wiId, field, v){
 async function addSubprocess(){
   const position = state.editorProcess.subprocesses.length;
   const { data, error } = await sb.from('subprocesses').insert({ process_id: state.editorProcess.id, name:'', position }).select().single();
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   data.steps = [];
   state.editorProcess.subprocesses.push(data);
   renderEditor();
 }
 async function removeSubprocess(spId){
-  if(!window.confirm('Delete this sub-process? All steps, tasks and work instructions inside it will be lost too.')) return;
+  if(!await showConfirm('Delete this sub-process? All steps, tasks and work instructions inside it will be lost too.')) return;
   await sb.from('subprocesses').delete().eq('id', spId);
   state.editorProcess.subprocesses = state.editorProcess.subprocesses.filter(s=>s.id!==spId);
   renderEditor();
@@ -574,13 +625,13 @@ async function addStep(spId){
   const sp = findSp(spId);
   const position = sp.steps.length;
   const { data, error } = await sb.from('steps').insert({ subprocess_id: spId, text:'', position }).select().single();
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   data.tasks = [];
   sp.steps.push(data);
   renderEditor();
 }
 async function removeStep(spId, stepId){
-  if(!window.confirm('Delete this step? All tasks and work instructions inside it will be lost too.')) return;
+  if(!await showConfirm('Delete this step? All tasks and work instructions inside it will be lost too.')) return;
   await sb.from('steps').delete().eq('id', stepId);
   const sp = findSp(spId);
   sp.steps = sp.steps.filter(s=>s.id!==stepId);
@@ -590,7 +641,7 @@ async function lockL3ForSp(spId){
   const sp = findSp(spId);
   if(!sp.steps.some(s=>s.text.trim())) return;
   const { error } = await sb.from('subprocesses').update({ l3_locked:true }).eq('id', spId);
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   sp.l3_locked = true;
   if(!state.editorSelectedStepId && sp.steps.length>0){
     state.editorSelectedStepId = sp.steps[0].id;
@@ -605,13 +656,13 @@ async function addTask(spId, stepId){
   const st = findStep(spId, stepId);
   const position = st.tasks.length;
   const { data, error } = await sb.from('tasks').insert({ step_id: stepId, text:'', position }).select().single();
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   data.work_instructions = [];
   st.tasks.push(data);
   renderEditor();
 }
 async function removeTask(spId, stepId, taskId){
-  if(!window.confirm('Delete this task? All work instructions inside it will be lost too.')) return;
+  if(!await showConfirm('Delete this task? All work instructions inside it will be lost too.')) return;
   await sb.from('tasks').delete().eq('id', taskId);
   const st = findStep(spId, stepId);
   st.tasks = st.tasks.filter(t=>t.id!==taskId);
@@ -621,12 +672,12 @@ async function addWI(spId, stepId, taskId){
   const task = findTask(spId, stepId, taskId);
   const position = task.work_instructions.length;
   const { data, error } = await sb.from('work_instructions').insert({ task_id: taskId, transaction:'', field:'', tool:'', position }).select().single();
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   task.work_instructions.push(data);
   renderEditor();
 }
 async function removeWI(spId, stepId, taskId, wiId){
-  if(!window.confirm('Delete this work instruction?')) return;
+  if(!await showConfirm('Delete this work instruction?')) return;
   await sb.from('work_instructions').delete().eq('id', wiId);
   const task = findTask(spId, stepId, taskId);
   task.work_instructions = task.work_instructions.filter(w=>w.id!==wiId);
@@ -636,7 +687,7 @@ async function lockL4ForStep(spId, stepId){
   const step = findStep(spId, stepId);
   if(!step.tasks.some(t=>t.text.trim())) return;
   const { error } = await sb.from('steps').update({ l4_locked:true }).eq('id', stepId);
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   step.l4_locked = true;
   if(!state.editorSelectedTaskId && step.tasks.length>0){
     state.editorSelectedTaskId = step.tasks[0].id;
@@ -651,7 +702,7 @@ async function lockL5ForTask(spId, stepId, taskId){
   const task = findTask(spId, stepId, taskId);
   if(!task.work_instructions.some(wi=>wi.transaction.trim()||wi.field.trim()||wi.tool.trim())) return;
   const { error } = await sb.from('tasks').update({ l5_locked:true }).eq('id', taskId);
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   task.l5_locked = true;
   renderEditor();
 }
@@ -682,7 +733,7 @@ async function exportExcel(processIdOnly, companyIdOnly){
   if(processIdOnly) query = query.eq('id', processIdOnly);
   else if(companyIdOnly) query = query.eq('company_id', companyIdOnly);
   const { data, error } = await query;
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   const rows = [];
   let hasAnySubprocessName = false;
   (data||[]).forEach(proc=>{
@@ -782,24 +833,24 @@ function toggleDraftCompany(rowId, companyId){
 async function syncProfileCompanies(profileId, companyIds, role){
   const level = (role === 'process_owner' || role === 'admin') ? 'edit' : 'view';
   const { error: delError } = await sb.from('profile_companies').delete().eq('profile_id', profileId);
-  if(delError){ toast(delError.message); return false; }
+  if(delError){ showError(delError.message); return false; }
   if(companyIds.length === 0) return true;
   const rows = companyIds.map(cid => ({ profile_id: profileId, company_id: cid, level }));
   const { error: insError } = await sb.from('profile_companies').insert(rows);
-  if(insError){ toast(insError.message); return false; }
+  if(insError){ showError(insError.message); return false; }
   return true;
 }
 async function approveUser(id){
   const role = document.getElementById('role-'+id).value;
   const { error } = await sb.from('profiles').update({ role, status:'approved' }).eq('id', id);
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   await syncProfileCompanies(id, state.adminDraftCompanies[id] || [], role);
   toast('User approved.');
   await loadAdminData(); render();
 }
 async function rejectUser(id){
   const { error } = await sb.from('profiles').update({ status:'rejected' }).eq('id', id);
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   toast('Request rejected.');
   await loadAdminData(); render();
 }
@@ -807,7 +858,7 @@ async function updateUser(id){
   const role = document.getElementById('urole-'+id).value;
   const status = document.getElementById('ustatus-'+id).value;
   const { error } = await sb.from('profiles').update({ role, status }).eq('id', id);
-  if(error){ toast(error.message); return; }
+  if(error){ showError(error.message); return; }
   await syncProfileCompanies(id, state.adminDraftCompanies[id] || [], role);
   toast('Saved.');
   await loadAdminData(); render();
