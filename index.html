@@ -239,6 +239,7 @@ let state = {
   accessTreeExpanded: {},
   accessTreeSelected: null,
   addAccessLevel: 'view',
+  addAccessGrantee: '',
   authError: ''
 };
 
@@ -386,7 +387,7 @@ async function doSignOut(){
     adminTab:'pending', adminPending:[], adminUsers:[],
     adminProfileCompanyRows:[], adminUcapMap:{}, adminAuditLog:[],
     adminGroups:[], adminGroupMembers:[], groupMembersModalFor:null,
-    accessTreeExpanded:{}, accessTreeSelected:null, addAccessLevel:'view', authError:'' };
+    accessTreeExpanded:{}, accessTreeSelected:null, addAccessLevel:'view', addAccessGrantee:'', authError:'' };
   render();
 }
 async function doForgotPassword(email){
@@ -920,6 +921,7 @@ function toggleAccessTreeCompany(companyId){
 function selectAccessTreeNode(type, companyId, processId){
   state.accessTreeSelected = { type, companyId, processId: processId || null };
   state.addAccessLevel = 'view';
+  state.addAccessGrantee = '';
   render();
 }
 function getGrantsForSelectedNode(){
@@ -954,8 +956,7 @@ async function removeNodeAccess(profileCompanyRowId){
 async function addAccessToSelectedNode(){
   const sel = state.accessTreeSelected;
   if(!sel) return;
-  const granteeSelect = document.getElementById('add-access-grantee');
-  const granteeValue = granteeSelect ? granteeSelect.value : '';
+  const granteeValue = state.addAccessGrantee;
   if(!granteeValue){ toast('Please choose a user or group first.'); return; }
   const sepIdx = granteeValue.indexOf(':');
   const kind = granteeValue.slice(0, sepIdx);
@@ -1008,6 +1009,7 @@ async function addAccessToSelectedNode(){
 
   toast('Access added.');
   state.addAccessLevel = 'view';
+  state.addAccessGrantee = '';
   await loadAdminData(); render();
 }
 
@@ -1362,10 +1364,10 @@ function renderAddAccessPanel(){
     <div class="card-hint" style="margin-bottom:14px;">${escapeHtml(label)}</div>
     <div class="field">
       <label>User or group</label>
-      <select id="add-access-grantee">
-        <option value="">— choose —</option>
-        ${userCandidates.length ? `<optgroup label="Users">${userCandidates.map(u=>`<option value="user:${u.id}">${escapeHtml(u.full_name || u.email || u.id)}</option>`).join('')}</optgroup>` : ''}
-        ${groupCandidates.length ? `<optgroup label="Groups">${groupCandidates.map(g=>`<option value="group:${g.id}">${escapeHtml(g.name)} (Group)</option>`).join('')}</optgroup>` : ''}
+      <select id="add-access-grantee" onchange="state.addAccessGrantee=this.value; render();">
+        <option value="" ${state.addAccessGrantee===''?'selected':''}>— choose —</option>
+        ${userCandidates.length ? `<optgroup label="Users">${userCandidates.map(u=>`<option value="user:${u.id}" ${state.addAccessGrantee==='user:'+u.id?'selected':''}>${escapeHtml(u.full_name || u.email || u.id)}</option>`).join('')}</optgroup>` : ''}
+        ${groupCandidates.length ? `<optgroup label="Groups">${groupCandidates.map(g=>`<option value="group:${g.id}" ${state.addAccessGrantee==='group:'+g.id?'selected':''}>${escapeHtml(g.name)} (Group)</option>`).join('')}</optgroup>` : ''}
       </select>
     </div>
     <div class="field">
