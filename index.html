@@ -236,6 +236,7 @@ let state = {
   editorProcess: null,
   editorSiblingProcesses: [],
   editingMegaCycle: false,
+  editorCanEdit: false,
   editorSelectedSpId: null,
   editorSelectedStepId: null,
   editorSelectedTaskId: null,
@@ -393,7 +394,7 @@ async function doSignOut(){
   await sb.auth.signOut();
   state = { screen:'login', user:null, profile:null, departments:[],
     companies:[], expandedCompanyId:null, showNewCompanyModal:false, newCompanyProcessNames:[], companySettingsFor:null,
-    editorProcess:null, editorSiblingProcesses:[], editingMegaCycle:false,
+    editorProcess:null, editorSiblingProcesses:[], editingMegaCycle:false, editorCanEdit:false,
     editorSelectedSpId:null,
     editorSelectedStepId:null,
     editorSelectedTaskId:null,
@@ -537,6 +538,8 @@ async function openEditor(processId){
   state.editingMegaCycle = false;
   const { data: siblings } = await sb.from('processes').select('id, l1_name').eq('company_id', data.company_id).order('l1_name');
   state.editorSiblingProcesses = siblings || [];
+  const { data: canEdit, error: canEditError } = await sb.rpc('can_edit', { target_company: data.company_id, target_process: data.id });
+  state.editorCanEdit = canEditError ? false : !!canEdit;
   state.screen = 'editor';
   render();
 }
@@ -1583,7 +1586,7 @@ function renderSavedRow(unlockCall){
 }
 
 function rowStatusHtml(isSel){
-  const isViewer = state.profile.role === 'viewer';
+  const isViewer = !state.editorCanEdit;
   const pillClass = isSel ? 'active' : 'todo';
   const label = isSel
     ? (isViewer ? 'Currently viewing' : 'Currently editing')
@@ -1596,7 +1599,7 @@ function rowStatusHtml(isSel){
 
 function renderEditorLeftPanel(){
   const p = state.editorProcess;
-  const readOnly = state.profile.role === 'viewer';
+  const readOnly = !state.editorCanEdit;
   const selSp = p.l2_locked ? (p.subprocesses.find(s=>s.id===state.editorSelectedSpId) || null) : null;
   const selStep = (selSp && selSp.l3_locked) ? (selSp.steps.find(s=>s.id===state.editorSelectedStepId) || null) : null;
   const selTask = (selStep && selStep.l4_locked) ? (selStep.tasks.find(t=>t.id===state.editorSelectedTaskId) || null) : null;
