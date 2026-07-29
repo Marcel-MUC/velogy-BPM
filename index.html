@@ -176,6 +176,15 @@
   .group-tag{ font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
     padding:2px 7px; border-radius:999px; white-space:nowrap; background:var(--navy); color:#fff; }
 
+  .combo-wrap{ position:relative; }
+  .combo-dropdown{ position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:30;
+    background:#fff; border:1px solid var(--gray-200); border-radius:10px; max-height:220px;
+    overflow-y:auto; box-shadow:0 8px 24px rgba(20,15,50,.12); }
+  .combo-option{ display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:9px 12px; font-size:13.5px; cursor:pointer; }
+  .combo-option:hover{ background:var(--gray-50); }
+  .combo-empty{ padding:9px 12px; font-size:13px; color:var(--gray-500); }
+
   .modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:flex; align-items:center;
     justify-content:center; z-index:40; }
   .modal-overlay.blur{ backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); }
@@ -240,6 +249,7 @@ let state = {
   accessTreeSelected: null,
   addAccessLevel: 'view',
   addAccessGrantee: '',
+  addAccessGranteeText: '',
   authError: ''
 };
 
@@ -387,7 +397,7 @@ async function doSignOut(){
     adminTab:'pending', adminPending:[], adminUsers:[],
     adminProfileCompanyRows:[], adminUcapMap:{}, adminAuditLog:[],
     adminGroups:[], adminGroupMembers:[], groupMembersModalFor:null,
-    accessTreeExpanded:{}, accessTreeSelected:null, addAccessLevel:'view', addAccessGrantee:'', authError:'' };
+    accessTreeExpanded:{}, accessTreeSelected:null, addAccessLevel:'view', addAccessGrantee:'', addAccessGranteeText:'', authError:'' };
   render();
 }
 async function doForgotPassword(email){
@@ -922,6 +932,7 @@ function selectAccessTreeNode(type, companyId, processId){
   state.accessTreeSelected = { type, companyId, processId: processId || null };
   state.addAccessLevel = 'view';
   state.addAccessGrantee = '';
+  state.addAccessGranteeText = '';
   render();
 }
 function getGrantsForSelectedNode(){
@@ -1010,6 +1021,7 @@ async function addAccessToSelectedNode(){
   toast('Access added.');
   state.addAccessLevel = 'view';
   state.addAccessGrantee = '';
+  state.addAccessGranteeText = '';
   await loadAdminData(); render();
 }
 
@@ -1353,22 +1365,68 @@ function renderAccessNodeUsers(){
     }).join('')}
   </div>`;
 }
+function granteeCandidates(){
+  const userCandidates = state.adminUsers.filter(u=>u.role!=='admin')
+    .map(u=>({ value:'user:'+u.id, label: u.full_name || u.email || u.id, isGroup:false }));
+  const groupCandidates = state.adminGroups
+    .map(g=>({ value:'group:'+g.id, label: g.name, isGroup:true }));
+  return [...userCandidates, ...groupCandidates];
+}
+function renderGranteeDropdownItems(query){
+  const q = (query||'').trim().toLowerCase();
+  const items = granteeCandidates().filter(c=> !q || c.label.toLowerCase().includes(q));
+  if(items.length===0) return `<div class="combo-empty">No matches.</div>`;
+  return items.map(c=>`<div class="combo-option" onclick="selectGrantee('${c.value}')">
+      <span>${escapeHtml(c.label)}</span>${c.isGroup ? `<span class="group-tag">Group</span>` : ''}
+    </div>`).join('');
+}
+function openGranteeDropdown(){
+  const dropdown = document.getElementById('add-access-grantee-dropdown');
+  const input = document.getElementById('add-access-grantee-input');
+  if(!dropdown) return;
+  dropdown.innerHTML = renderGranteeDropdownItems(input ? input.value : '');
+  dropdown.style.display = 'block';
+}
+function closeGranteeDropdown(){
+  const dropdown = document.getElementById('add-access-grantee-dropdown');
+  if(dropdown) dropdown.style.display = 'none';
+}
+function onGranteeSearchInput(v){
+  state.addAccessGranteeText = v;
+  state.addAccessGrantee = '';
+  const dropdown = document.getElementById('add-access-grantee-dropdown');
+  if(!dropdown) return;
+  dropdown.innerHTML = renderGranteeDropdownItems(v);
+  dropdown.style.display = 'block';
+}
+function selectGrantee(value){
+  const sepIdx = value.indexOf(':');
+  const kind = value.slice(0, sepIdx);
+  const id = value.slice(sepIdx + 1);
+  const label = kind === 'group' ? `${groupLabel(id)} (Group)` : findProfileLabel(id);
+  state.addAccessGrantee = value;
+  state.addAccessGranteeText = label;
+  const input = document.getElementById('add-access-grantee-input');
+  if(input) input.value = label;
+  closeGranteeDropdown();
+}
 function renderAddAccessPanel(){
   const sel = state.accessTreeSelected;
   if(!sel) return `<div class="card"><div class="empty-note">Select a company or mega-cycle on the left first.</div></div>`;
   const label = sel.type==='company' ? companyLabel(sel.companyId) : `${companyLabel(sel.companyId)} — ${processLabel(sel.companyId, sel.processId)}`;
-  const userCandidates = state.adminUsers.filter(u=>u.role!=='admin');
-  const groupCandidates = state.adminGroups;
   return `<div class="card">
     <div class="card-title" style="margin-bottom:4px;">Add access</div>
     <div class="card-hint" style="margin-bottom:14px;">${escapeHtml(label)}</div>
     <div class="field">
       <label>User or group</label>
-      <select id="add-access-grantee" onchange="state.addAccessGrantee=this.value; render();">
-        <option value="" ${state.addAccessGrantee===''?'selected':''}>— choose —</option>
-        ${userCandidates.length ? `<optgroup label="Users">${userCandidates.map(u=>`<option value="user:${u.id}" ${state.addAccessGrantee==='user:'+u.id?'selected':''}>${escapeHtml(u.full_name || u.email || u.id)}</option>`).join('')}</optgroup>` : ''}
-        ${groupCandidates.length ? `<optgroup label="Groups">${groupCandidates.map(g=>`<option value="group:${g.id}" ${state.addAccessGrantee==='group:'+g.id?'selected':''}>${escapeHtml(g.name)} (Group)</option>`).join('')}</optgroup>` : ''}
-      </select>
+      <div class="combo-wrap">
+        <input type="text" id="add-access-grantee-input" placeholder="Search users or groups…" autocomplete="off"
+          value="${escapeHtml(state.addAccessGranteeText)}"
+          oninput="onGranteeSearchInput(this.value)"
+          onfocus="openGranteeDropdown()"
+          onblur="closeGranteeDropdown()">
+        <div id="add-access-grantee-dropdown" class="combo-dropdown" style="display:none;" onmousedown="event.preventDefault()"></div>
+      </div>
     </div>
     <div class="field">
       <label>Level</label>
