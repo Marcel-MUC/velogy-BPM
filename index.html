@@ -168,8 +168,11 @@
   .access-tree-node.child{ padding-left:30px; font-weight:500; font-size:13px; }
   .access-user-row{ display:flex; align-items:center; justify-content:space-between; gap:8px;
     padding:8px 0; border-bottom:1px solid var(--gray-100); font-size:13px; }
-  .access-user-row:last-child{ border-bottom:none; }
+  .access-grant-row-wrap:last-child .access-user-row{ border-bottom:none; }
   .access-user-row .access-user-name{ flex:1; }
+  .access-user-row.overridden{ opacity:.55; }
+  .scope-note{ font-size:11.5px; font-weight:500; color:var(--gray-500); }
+  .overridden-note{ font-size:11px; color:var(--gray-500); font-style:italic; padding:0 0 8px 2px; margin-top:-4px; }
   .level-badge{ font-size:11px; font-weight:600; padding:2px 8px; border-radius:999px; white-space:nowrap; }
   .level-badge.edit{ background:var(--violet-light); color:var(--violet-dark); }
   .level-badge.view{ background:var(--gray-100); color:var(--gray-700); }
@@ -239,8 +242,8 @@ let state = {
   adminTab: 'pending',
   adminPending: [],
   adminUsers: [],
-  adminProfileCompanyRows: [],
-  adminUcapMap: {},
+  adminCompanyAccessRows: [],
+  adminProcessAccessRows: [],
   adminAuditLog: [],
   adminGroups: [],
   adminGroupMembers: [],
@@ -395,7 +398,7 @@ async function doSignOut(){
     editorSelectedStepId:null,
     editorSelectedTaskId:null,
     adminTab:'pending', adminPending:[], adminUsers:[],
-    adminProfileCompanyRows:[], adminUcapMap:{}, adminAuditLog:[],
+    adminCompanyAccessRows:[], adminProcessAccessRows:[], adminAuditLog:[],
     adminGroups:[], adminGroupMembers:[], groupMembersModalFor:null,
     accessTreeExpanded:{}, accessTreeSelected:null, addAccessLevel:'view', addAccessGrantee:'', addAccessGranteeText:'', authError:'' };
   render();
@@ -829,16 +832,11 @@ async function loadAdminData(){
 
   if(state.companies.length === 0) await loadCompanies();
 
-  const { data: pcRows } = await sb.from('profile_companies').select('id, profile_id, group_id, company_id, level, scope');
-  state.adminProfileCompanyRows = pcRows || [];
+  const { data: caRows } = await sb.from('company_access').select('id, company_id, profile_id, group_id, level');
+  state.adminCompanyAccessRows = caRows || [];
 
-  const { data: ucapRows } = await sb.from('user_company_access_processes').select('user_company_access_id, process_id');
-  const ucapMap = {};
-  (ucapRows || []).forEach(row=>{
-    if(!ucapMap[row.user_company_access_id]) ucapMap[row.user_company_access_id] = [];
-    ucapMap[row.user_company_access_id].push(row.process_id);
-  });
-  state.adminUcapMap = ucapMap;
+  const { data: paRows } = await sb.from('process_access').select('id, process_id, profile_id, group_id, level');
+  state.adminProcessAccessRows = paRows || [];
 
   const { data: auditRows } = await sb.from('audit_log')
     .select('id, actor_id, target_id, action, old_value, new_value, created_at')
@@ -909,20 +907,15 @@ function processLabel(companyId, processId){
   const p = c && c.processes ? c.processes.find(x=>x.id===processId) : null;
   return p ? p.l1_name : processId;
 }
-function summarizeGrant(companyId, level, scope, processIds){
-  const c = state.companies.find(x=>x.id===companyId);
-  const levelLabel = level === 'edit' ? 'Editor' : 'Viewer';
-  let scopeLabel;
-  if(scope === 'specific'){
-    const names = (processIds||[]).map(pid=>{
-      const p = c && c.processes ? c.processes.find(x=>x.id===pid) : null;
-      return p ? p.l1_name : pid;
-    });
-    scopeLabel = names.length ? `Specific (${names.join(', ')})` : 'Specific (none selected)';
-  } else {
-    scopeLabel = 'All mega-cycles';
-  }
-  return `${companyLabel(companyId)}: ${levelLabel} / ${scopeLabel}`;
+function companyIdForProcess(processId){
+  const c = state.companies.find(comp=>(comp.processes||[]).some(p=>p.id===processId));
+  return c ? c.id : null;
+}
+function levelLabel(level){
+  return level === 'edit' ? 'Editor' : 'Viewer';
+}
+function granteeKey(profileId, groupId){
+  return profileId ? 'user:'+profileId : 'group:'+groupId;
 }
 function toggleAccessTreeCompany(companyId){
   state.accessTreeExpanded[companyId] = !state.accessTreeExpanded[companyId];
@@ -938,28 +931,35 @@ function selectAccessTreeNode(type, companyId, processId){
 function getGrantsForSelectedNode(){
   const sel = state.accessTreeSelected;
   if(!sel) return [];
-  const result = [];
-  state.adminProfileCompanyRows.forEach(r=>{
-    if(r.company_id !== sel.companyId) return;
-    if(r.scope === 'all'){
-      result.push({ row:r, profileId:r.profile_id, groupId:r.group_id, level:r.level });
-    } else if(sel.type === 'process' && r.scope === 'specific'){
-      const pids = state.adminUcapMap[r.id] || [];
-      if(pids.includes(sel.processId)) result.push({ row:r, profileId:r.profile_id, groupId:r.group_id, level:r.level });
-    }
-  });
-  return result;
+  if(sel.type === 'company'){
+    return state.adminCompanyAccessRows
+      .filter(r=>r.company_id===sel.companyId)
+      .map(r=>({ kind:'company', row:r, profileId:r.profile_id, groupId:r.group_id, level:r.level, overridden:false }));
+  }
+  // Mega-cycle node: company-level grants (flagged if a process-level row for
+  // the same grantee overrides them here) plus this process's own grants.
+  const processRows = state.adminProcessAccessRows.filter(r=>r.process_id===sel.processId);
+  const processKeys = new Set(processRows.map(r=>granteeKey(r.profile_id, r.group_id)));
+  const companyRows = state.adminCompanyAccessRows
+    .filter(r=>r.company_id===sel.companyId)
+    .map(r=>({ kind:'company', row:r, profileId:r.profile_id, groupId:r.group_id, level:r.level,
+      overridden: processKeys.has(granteeKey(r.profile_id, r.group_id)) }));
+  const processGrants = processRows.map(r=>({ kind:'process', row:r, profileId:r.profile_id, groupId:r.group_id, level:r.level, overridden:false }));
+  return [...companyRows, ...processGrants];
 }
-async function removeNodeAccess(profileCompanyRowId){
+async function removeNodeAccess(kind, rowId){
   if(!await showConfirm('Remove this access?')) return;
-  const row = state.adminProfileCompanyRows.find(r=>r.id===profileCompanyRowId);
-  const { error } = await sb.from('profile_companies').delete().eq('id', profileCompanyRowId);
+  const table = kind === 'company' ? 'company_access' : 'process_access';
+  const rows = kind === 'company' ? state.adminCompanyAccessRows : state.adminProcessAccessRows;
+  const row = rows.find(r=>r.id===rowId);
+  const { error } = await sb.from(table).delete().eq('id', rowId);
   if(error){ showError(error.message); return; }
   if(row){
-    const pids = state.adminUcapMap[row.id] || [];
-    const summary = summarizeGrant(row.company_id, row.level, row.scope, pids);
-    const label = row.group_id ? `Group: ${groupLabel(row.group_id)} — ${summary}` : summary;
-    await logAudit(row.profile_id, 'company_access_revoked', label, null);
+    const granteePrefix = row.group_id ? `Group: ${groupLabel(row.group_id)} — ` : '';
+    const summary = kind === 'company'
+      ? `${companyLabel(row.company_id)}: ${levelLabel(row.level)}`
+      : `${companyLabel(companyIdForProcess(row.process_id))} — ${processLabel(companyIdForProcess(row.process_id), row.process_id)}: ${levelLabel(row.level)}`;
+    await logAudit(row.profile_id, kind === 'company' ? 'company_access_revoked' : 'process_access_revoked', granteePrefix + summary, null);
   }
   toast('Access removed.');
   await loadAdminData(); render();
@@ -974,49 +974,35 @@ async function addAccessToSelectedNode(){
   const granteeId = granteeValue.slice(sepIdx + 1);
   const isGroup = kind === 'group';
   // Read exactly once, right here — nothing else touches this value before
-  // it's written below, for either the update or the insert path.
+  // it's written below.
   const level = state.addAccessLevel;
-
-  const existing = state.adminProfileCompanyRows.find(r=> isGroup
-    ? (r.group_id===granteeId && r.company_id===sel.companyId)
-    : (r.profile_id===granteeId && r.company_id===sel.companyId));
-  const existingPids = existing ? (state.adminUcapMap[existing.id] || []) : [];
   const granteePrefix = isGroup ? `Group: ${groupLabel(granteeId)} — ` : '';
-  const beforeLabel = existing ? (granteePrefix + summarizeGrant(sel.companyId, existing.level, existing.scope, existingPids)) : null;
 
-  let newScope, newProcessIds;
-  if(sel.type === 'company' || (existing && existing.scope === 'all')){
-    newScope = 'all'; newProcessIds = [];
-  } else {
-    newScope = 'specific';
-    newProcessIds = (existing && existing.scope==='specific')
-      ? Array.from(new Set([...existingPids, sel.processId]))
-      : [sel.processId];
-  }
-
-  let rowId;
-  if(existing){
-    const { error } = await sb.from('profile_companies').update({ level, scope:newScope }).eq('id', existing.id);
+  if(sel.type === 'company'){
+    const existing = state.adminCompanyAccessRows.find(r=> isGroup
+      ? (r.group_id===granteeId && r.company_id===sel.companyId)
+      : (r.profile_id===granteeId && r.company_id===sel.companyId));
+    const beforeLabel = existing ? `${granteePrefix}${companyLabel(sel.companyId)}: ${levelLabel(existing.level)}` : null;
+    const payload = isGroup
+      ? { company_id:sel.companyId, group_id:granteeId, profile_id:null, level }
+      : { company_id:sel.companyId, profile_id:granteeId, group_id:null, level };
+    const { error } = await sb.from('company_access')
+      .upsert(payload, { onConflict: isGroup ? 'company_id,group_id' : 'company_id,profile_id' });
     if(error){ showError(error.message); return; }
-    rowId = existing.id;
-    const { error: delUcapErr } = await sb.from('user_company_access_processes').delete().eq('user_company_access_id', rowId);
-    if(delUcapErr){ showError(delUcapErr.message); return; }
+    await logAudit(isGroup ? null : granteeId, 'company_access_granted', beforeLabel, `${granteePrefix}${companyLabel(sel.companyId)}: ${levelLabel(level)}`);
   } else {
-    const insertPayload = isGroup
-      ? { group_id:granteeId, company_id:sel.companyId, level, scope:newScope }
-      : { profile_id:granteeId, company_id:sel.companyId, level, scope:newScope };
-    const { data, error } = await sb.from('profile_companies')
-      .insert(insertPayload).select('id').single();
+    const existing = state.adminProcessAccessRows.find(r=> isGroup
+      ? (r.group_id===granteeId && r.process_id===sel.processId)
+      : (r.profile_id===granteeId && r.process_id===sel.processId));
+    const beforeLabel = existing ? `${granteePrefix}${companyLabel(sel.companyId)} — ${processLabel(sel.companyId, sel.processId)}: ${levelLabel(existing.level)}` : null;
+    const payload = isGroup
+      ? { process_id:sel.processId, group_id:granteeId, profile_id:null, level }
+      : { process_id:sel.processId, profile_id:granteeId, group_id:null, level };
+    const { error } = await sb.from('process_access')
+      .upsert(payload, { onConflict: isGroup ? 'process_id,group_id' : 'process_id,profile_id' });
     if(error){ showError(error.message); return; }
-    rowId = data.id;
+    await logAudit(isGroup ? null : granteeId, 'process_access_granted', beforeLabel, `${granteePrefix}${companyLabel(sel.companyId)} — ${processLabel(sel.companyId, sel.processId)}: ${levelLabel(level)}`);
   }
-  if(newScope === 'specific' && newProcessIds.length){
-    const { error: ucapErr } = await sb.from('user_company_access_processes')
-      .insert(newProcessIds.map(pid=>({ user_company_access_id: rowId, process_id: pid })));
-    if(ucapErr){ showError(ucapErr.message); return; }
-  }
-
-  await logAudit(isGroup ? null : granteeId, 'company_access_granted', beforeLabel, granteePrefix + summarizeGrant(sel.companyId, level, newScope, newProcessIds));
 
   toast('Access added.');
   state.addAccessLevel = 'view';
@@ -1356,11 +1342,14 @@ function renderAccessNodeUsers(){
         const u = state.adminUsers.find(x=>x.id===g.profileId);
         name = u ? (u.full_name || u.email || g.profileId) : g.profileId;
       }
-      return `<div class="access-user-row">
-        <span class="access-user-name">${escapeHtml(name)}</span>
-        ${isGroup ? `<span class="group-tag">Group</span>` : ''}
-        <span class="level-badge ${g.level==='edit'?'edit':'view'}">${g.level==='edit'?'Editor':'Viewer'}</span>
-        <button class="icon-btn" onclick="removeNodeAccess('${g.row.id}')">✕</button>
+      return `<div class="access-grant-row-wrap">
+        <div class="access-user-row ${g.overridden?'overridden':''}">
+          <span class="access-user-name">${escapeHtml(name)}${g.kind==='company' ? ` <span class="scope-note">(via whole company)</span>` : ''}</span>
+          ${isGroup ? `<span class="group-tag">Group</span>` : ''}
+          <span class="level-badge ${g.level==='edit'?'edit':'view'}">${g.level==='edit'?'Editor':'Viewer'}</span>
+          <button class="icon-btn" onclick="removeNodeAccess('${g.kind}','${g.row.id}')">✕</button>
+        </div>
+        ${g.overridden ? `<div class="overridden-note">Overridden by the mega-cycle setting below</div>` : ''}
       </div>`;
     }).join('')}
   </div>`;
@@ -1443,8 +1432,10 @@ function renderAdminAuditLog(){
   const actionLabels = {
     role_changed: 'Role changed',
     status_changed: 'Status changed',
-    company_access_granted: 'Access granted/changed',
-    company_access_revoked: 'Access revoked'
+    company_access_granted: 'Company access granted/changed',
+    company_access_revoked: 'Company access revoked',
+    process_access_granted: 'Mega-cycle access granted/changed',
+    process_access_revoked: 'Mega-cycle access revoked'
   };
   return `<table class="admin-table"><thead><tr>
     <th>When</th><th>Actor</th><th>Target</th><th>Action</th><th>Change</th>
