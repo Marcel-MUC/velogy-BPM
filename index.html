@@ -114,11 +114,6 @@
   .step-text{ flex:1; font-size:13px; }
   .task-block{ background:var(--gray-50); border:1px solid var(--gray-200); border-radius:10px; padding:10px 12px; margin-bottom:10px; }
   .task-block-header{ font-size:12px; color:var(--gray-500); margin-bottom:6px; }
-  .wi-row{ display:grid; grid-template-columns:1fr 1fr 1fr 26px; gap:6px; margin-top:6px; }
-  .wi-row input{ font-size:12.5px; padding:6px 8px; }
-  .wi-view{ margin-bottom:12px; }
-  .wi-view-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
-  .wi-view-label{ font-size:11.5px; color:var(--gray-500); margin-bottom:5px; font-weight:600; }
   .wi-view-value{ background:var(--gray-50); border:1px solid var(--gray-200); border-radius:9px; padding:10px 12px;
     font-family:var(--mono); font-size:13.5px; color:var(--gray-800); word-break:break-word; }
   .stats{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin:14px 0 18px; }
@@ -517,7 +512,7 @@ async function openEditor(processId){
       subprocesses ( id, name, position, l3_locked, l4_locked,
         steps ( id, text, position, l4_locked,
           tasks ( id, text, position, l5_locked,
-            work_instructions ( id, transaction, field, tool, position )
+            work_instructions ( id, text, position )
           )
         )
       )
@@ -613,12 +608,12 @@ function onTaskText(spId, stepId, taskId, v){
     reportSaveResult(error, data);
   });
 }
-function onWI(spId, stepId, taskId, wiId, field, v){
+function onWI(spId, stepId, taskId, wiId, v){
   const wi = findTask(spId, stepId, taskId).work_instructions.find(w=>w.id===wiId);
-  wi[field] = v; updateEditorTree();
-  refreshSaveButton('l5-save-btn', findTask(spId, stepId, taskId).work_instructions.some(w=>w.transaction.trim()||w.field.trim()||w.tool.trim()));
-  debounced('wi-'+wiId+'-'+field, async ()=>{
-    const { data, error } = await sb.from('work_instructions').update({ [field]:v }).eq('id', wiId).select();
+  wi.text = v; updateEditorTree();
+  refreshSaveButton('l5-save-btn', findTask(spId, stepId, taskId).work_instructions.some(w=>w.text.trim()));
+  debounced('wi-'+wiId, async ()=>{
+    const { data, error } = await sb.from('work_instructions').update({ text:v }).eq('id', wiId).select();
     reportSaveResult(error, data);
   });
 }
@@ -701,7 +696,7 @@ async function removeTask(spId, stepId, taskId){
 async function addWI(spId, stepId, taskId){
   const task = findTask(spId, stepId, taskId);
   const position = task.work_instructions.length;
-  const { data, error } = await sb.from('work_instructions').insert({ task_id: taskId, transaction:'', field:'', tool:'', position }).select().single();
+  const { data, error } = await sb.from('work_instructions').insert({ task_id: taskId, text:'', position }).select().single();
   if(error){ showError(error.message); return; }
   task.work_instructions.push(data);
   renderEditor();
@@ -730,7 +725,7 @@ async function unlockL4ForStep(spId, stepId){
 }
 async function lockL5ForTask(spId, stepId, taskId){
   const task = findTask(spId, stepId, taskId);
-  if(!task.work_instructions.some(wi=>wi.transaction.trim()||wi.field.trim()||wi.tool.trim())) return;
+  if(!task.work_instructions.some(wi=>wi.text.trim())) return;
   const { error } = await sb.from('tasks').update({ l5_locked:true }).eq('id', taskId);
   if(error){ showError(error.message); return; }
   task.l5_locked = true;
@@ -755,7 +750,7 @@ async function exportExcel(processIdOnly, companyIdOnly){
       subprocesses ( name, position,
         steps ( text, position,
           tasks ( text, position,
-            work_instructions ( transaction, field, tool, position )
+            work_instructions ( text, position )
           )
         )
       )
@@ -780,14 +775,14 @@ async function exportExcel(processIdOnly, companyIdOnly){
           "L3 Process step": st.text
         };
         const tasks = (st.tasks||[]).sort((a,b)=>a.position-b.position);
-        if(tasks.length===0){ rows.push({...base, "L4 Task":'', "L5 Transaction":'', "L5 Field":'', "L5 Tool":''}); return; }
+        if(tasks.length===0){ rows.push({...base, "L4 Task":'', "L5 Work instruction":''}); return; }
         tasks.forEach(task=>{
           if(!task.text || !task.text.trim()) return;
           const wis = (task.work_instructions||[]).sort((a,b)=>a.position-b.position)
-            .filter(wi=> wi.transaction || wi.field || wi.tool);
-          if(wis.length===0){ rows.push({...base, "L4 Task":task.text, "L5 Transaction":'', "L5 Field":'', "L5 Tool":''}); return; }
+            .filter(wi=> wi.text && wi.text.trim());
+          if(wis.length===0){ rows.push({...base, "L4 Task":task.text, "L5 Work instruction":''}); return; }
           wis.forEach(wi=>{
-            rows.push({...base, "L4 Task":task.text, "L5 Transaction":wi.transaction||'', "L5 Field":wi.field||'', "L5 Tool":wi.tool||''});
+            rows.push({...base, "L4 Task":task.text, "L5 Work instruction":wi.text||''});
           });
         });
       });
@@ -800,7 +795,7 @@ async function exportExcel(processIdOnly, companyIdOnly){
     return;
   }
   const ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = [{wch:16},{wch:16},{wch:20},{wch:20},{wch:26},{wch:26},{wch:16},{wch:16},{wch:16}];
+  ws['!cols'] = [{wch:16},{wch:16},{wch:20},{wch:20},{wch:26},{wch:26},{wch:32}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Process Capture");
 
@@ -1726,7 +1721,7 @@ function renderEditorLeftPanel(){
   /* ---------- L5: work instructions of the selected task ---------- */
   html += `<div class="card ${c5}">
     <div class="card-head" style="${(selTask&&selTask.l5_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="badge ${selTask?'badge-green':'badge-gray'}">L5</span><span class="card-title">Work instructions</span></div>
-    <span class="card-hint">system-specific: transaction, field, tool</span></div>`;
+    <span class="card-hint">System-specific: transaction codes, field names, key actions.</span></div>`;
   if(!selStep || !selStep.l4_locked){
     html += `<div class="empty-note">Save L4 for a step first, then select a task.</div>`;
   } else if(!selTask){
@@ -1737,36 +1732,22 @@ function renderEditorLeftPanel(){
     if(!selTask.l5_locked){
       selTask.work_instructions.forEach(wi=>{
         if(readOnly){
-          html += `<div class="wi-view">
-            <div class="wi-view-grid">
-              <div><div class="wi-view-label">TRANSACTION</div><div class="wi-view-value">${escapeHtml(wi.transaction) || '—'}</div></div>
-              <div><div class="wi-view-label">FIELD</div><div class="wi-view-value">${escapeHtml(wi.field) || '—'}</div></div>
-              <div><div class="wi-view-label">TOOL</div><div class="wi-view-value">${escapeHtml(wi.tool) || '—'}</div></div>
-            </div>
-          </div>`;
+          html += `<div class="row-input"><span style="flex:1;">${escapeHtml(wi.text || '(untitled)')}</span></div>`;
         } else {
-          html += `<div class="wi-row">
-            <input type="text" placeholder="Transaction" value="${escapeHtml(wi.transaction)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','transaction', this.value)">
-            <input type="text" placeholder="Field" value="${escapeHtml(wi.field)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','field', this.value)">
-            <input type="text" placeholder="Tool" value="${escapeHtml(wi.tool)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}','tool', this.value)">
+          html += `<div class="row-input">
+            <input type="text" placeholder="e.g. Enter customer ID in transaction VA01" value="${escapeHtml(wi.text)}" oninput="onWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}', this.value)">
             <button class="icon-btn" onclick="removeWI('${selSp.id}','${selStep.id}','${selTask.id}','${wi.id}')">✕</button>
           </div>`;
         }
       });
       if(!readOnly){
         html += `<button class="link-btn" onclick="addWI('${selSp.id}','${selStep.id}','${selTask.id}')">+ add work instruction</button>`;
-        const hasAnyWI = selTask.work_instructions.some(wi=>wi.transaction.trim()||wi.field.trim()||wi.tool.trim());
+        const hasAnyWI = selTask.work_instructions.some(wi=>wi.text.trim());
         html += `<button id="l5-save-btn" class="lock-btn" ${!hasAnyWI ? 'disabled':''} onclick="lockL5ForTask('${selSp.id}','${selStep.id}','${selTask.id}')">Save L5</button>`;
       }
     } else {
       selTask.work_instructions.forEach(wi=>{
-        html += `<div class="wi-view">
-          <div class="wi-view-grid">
-            <div><div class="wi-view-label">TRANSACTION</div><div class="wi-view-value">${escapeHtml(wi.transaction) || '—'}</div></div>
-            <div><div class="wi-view-label">FIELD</div><div class="wi-view-value">${escapeHtml(wi.field) || '—'}</div></div>
-            <div><div class="wi-view-label">TOOL</div><div class="wi-view-value">${escapeHtml(wi.tool) || '—'}</div></div>
-          </div>
-        </div>`;
+        html += `<div class="wi-view-value" style="margin-bottom:8px;">${escapeHtml(wi.text) || '—'}</div>`;
       });
       if(!readOnly) html += renderSavedRow(`unlockL5ForTask('${selSp.id}','${selStep.id}','${selTask.id}')`);
     }
@@ -1783,7 +1764,7 @@ function updateEditorTree(){
   const l2c = p.subprocesses.filter(s=>s.name.trim()).length;
   const l3c = p.subprocesses.reduce((n,s)=> n + s.steps.filter(st=>st.text.trim()).length, 0);
   const l4c = p.subprocesses.reduce((n,s)=> n + s.steps.reduce((m,st)=> m + st.tasks.filter(t=>t.text.trim()).length, 0), 0);
-  const l5c = p.subprocesses.reduce((n,s)=> n + s.steps.reduce((m,st)=> m + st.tasks.reduce((k,t)=> k + t.work_instructions.filter(w=>w.transaction.trim()||w.field.trim()||w.tool.trim()).length, 0), 0), 0);
+  const l5c = p.subprocesses.reduce((n,s)=> n + s.steps.reduce((m,st)=> m + st.tasks.reduce((k,t)=> k + t.work_instructions.filter(w=>w.text.trim()).length, 0), 0), 0);
   const statsEl = document.getElementById('stats');
   if(statsEl) statsEl.innerHTML = `
     <div class="stat"><div class="l">L1</div><div class="n">${l1c}</div></div>
@@ -1805,9 +1786,8 @@ function updateEditorTree(){
           if(!task.text.trim()) return;
           h += `<div class="tree-l4">${escapeHtml(task.text)}</div>`;
           task.work_instructions.forEach(wi=>{
-            if(!wi.transaction.trim() && !wi.field.trim() && !wi.tool.trim()) return;
-            const parts = [wi.transaction, wi.field, wi.tool].filter(Boolean).map(escapeHtml).join(' · ');
-            h += `<div class="tree-l5">${parts}</div>`;
+            if(!wi.text.trim()) return;
+            h += `<div class="tree-l5">${escapeHtml(wi.text)}</div>`;
           });
         });
       });
