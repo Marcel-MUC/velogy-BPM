@@ -203,6 +203,10 @@
   .error-toast .error-toast-icon{ color:var(--red); font-size:16px; flex-shrink:0; line-height:1.3; }
   .error-toast .error-toast-msg{ flex:1; white-space:pre-wrap; line-height:1.4; word-break:break-word; }
 
+  .compare-add-btn{ width:38px; height:38px; border-radius:50%; background:var(--violet); color:#fff; border:none;
+    font-size:20px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center;
+    line-height:1; flex-shrink:0; transition:background .12s ease; }
+  .compare-add-btn:hover{ background:var(--violet-dark); }
   .compare-crumb{ font-size:13px; font-weight:600; color:var(--gray-500); cursor:pointer; }
   .compare-crumb:hover{ color:var(--violet-dark); }
   .compare-crumb.current{ color:var(--gray-900); cursor:default; }
@@ -287,6 +291,7 @@ let state = {
   addAccessGranteeText: '',
   comparePickerCompanyA: '',
   comparePickerCompanyB: '',
+  showCompareCreateModal: false,
   compareSessions: [],
   compareSession: null,
   comparePath: [],
@@ -443,7 +448,7 @@ async function doSignOut(){
     adminCompanyAccessRows:[], adminProcessAccessRows:[], adminAuditLog:[],
     adminGroups:[], adminGroupMembers:[], groupMembersModalFor:null,
     accessTreeExpanded:{}, accessTreeSelected:null, addAccessLevel:'view', addAccessGrantee:'', addAccessGranteeText:'',
-    comparePickerCompanyA:'', comparePickerCompanyB:'', compareSessions:[], compareSession:null, comparePath:[], compareItemsA:[], compareItemsB:[],
+    comparePickerCompanyA:'', comparePickerCompanyB:'', showCompareCreateModal:false, compareSessions:[], compareSession:null, comparePath:[], compareItemsA:[], compareItemsB:[],
     compareLinks:[], compareSelectedA:null, compareStatusPickerFor:null, authError:'' };
   render();
 }
@@ -1121,9 +1126,20 @@ async function loadCompareSessions(){
 function openComparePicker(){
   state.comparePickerCompanyA = '';
   state.comparePickerCompanyB = '';
+  state.showCompareCreateModal = false;
   state.screen = 'compare-picker';
   render();
   loadCompareSessions().then(render);
+}
+function openCompareCreateModal(){
+  state.comparePickerCompanyA = '';
+  state.comparePickerCompanyB = '';
+  state.showCompareCreateModal = true;
+  render();
+}
+function closeCompareCreateModal(){
+  state.showCompareCreateModal = false;
+  render();
 }
 function openExistingCompareSession(sessionId){
   const session = state.compareSessions.find(s=>s.id===sessionId);
@@ -1161,6 +1177,7 @@ async function startComparison(){
   state.compareSession = session;
   state.comparePath = [];
   state.compareItemsA = []; state.compareItemsB = []; state.compareLinks = [];
+  state.showCompareCreateModal = false;
   state.screen = 'compare';
   render();
   await loadCompareLevel();
@@ -1334,10 +1351,6 @@ function compareBreadcrumbTo(index){
 }
 
 function renderCompareSessionsList(){
-  const isAdmin = state.profile.role==='admin';
-  if(state.compareSessions.length===0){
-    return `<div class="empty-note">${isAdmin ? 'No comparisons yet — create one below.' : 'No comparisons yet.'}</div>`;
-  }
   return state.compareSessions.map(s=>{
     const nameA = compareCompanyName(s.company_a_id);
     const nameB = compareCompanyName(s.company_b_id);
@@ -1352,18 +1365,23 @@ function renderComparePicker(){
   return `${renderHeader()}
   <div class="wrap">
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px; padding-left:16px;">
-      <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Compare companies</div>
-      <button class="btn btn-ghost" onclick="exitCompare()">← Back to overview</button>
+      <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Comparisons</div>
+      <div class="actions">
+        <button class="btn btn-ghost" onclick="exitCompare()">← Back to overview</button>
+        ${isAdmin ? `<button class="compare-add-btn" onclick="openCompareCreateModal()" title="New comparison">+</button>` : ''}
+      </div>
     </div>
-    <div class="card" style="max-width:520px;">
-      <div class="card-title" style="margin-bottom:4px;">Existing comparisons</div>
-      <div class="card-hint" style="margin-bottom:14px;">${isAdmin ? 'Click one to continue it, or start a new comparison below.' : 'Click one to view it.'}</div>
-      ${renderCompareSessionsList()}
-    </div>
-    ${isAdmin ? `
-    <div class="card" style="max-width:520px;">
-      <div class="card-title" style="margin-bottom:4px;">Select two companies</div>
-      <div class="card-hint" style="margin-bottom:14px;">Map their process trees against each other, level by level.</div>
+    ${state.compareSessions.length===0
+      ? `<div class="empty-note" style="padding-left:16px;">${isAdmin ? 'No comparisons yet — click + to create one.' : 'No comparisons yet.'}</div>`
+      : `<div class="card">${renderCompareSessionsList()}</div>`}
+  </div>
+  ${state.showCompareCreateModal ? renderCompareCreateModal() : ''}`;
+}
+function renderCompareCreateModal(){
+  return `<div class="modal-overlay" onclick="if(event.target===this) closeCompareCreateModal()">
+    <div class="modal" style="width:460px;">
+      <h3>New comparison</h3>
+      <p class="card-hint" style="margin:-6px 0 14px;">Map two companies' process trees against each other, level by level.</p>
       <div class="field">
         <label>Company A</label>
         <select onchange="state.comparePickerCompanyA=this.value;">
@@ -1378,8 +1396,9 @@ function renderComparePicker(){
           ${state.companies.map(c=>`<option value="${c.id}" ${state.comparePickerCompanyB===c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}
         </select>
       </div>
-      <button class="btn btn-primary" style="width:100%; margin-top:6px;" onclick="startComparison()">Start comparison</button>
-    </div>` : ''}
+      <button class="full-btn" onclick="startComparison()">Start comparison</button>
+      <button class="link-btn" style="margin-top:10px;" onclick="closeCompareCreateModal()">Cancel</button>
+    </div>
   </div>`;
 }
 function renderCompareBreadcrumb(){
