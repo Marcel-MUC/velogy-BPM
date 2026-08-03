@@ -203,10 +203,6 @@
   .error-toast .error-toast-icon{ color:var(--red); font-size:16px; flex-shrink:0; line-height:1.3; }
   .error-toast .error-toast-msg{ flex:1; white-space:pre-wrap; line-height:1.4; word-break:break-word; }
 
-  .compare-add-btn{ width:38px; height:38px; border-radius:50%; background:var(--violet); color:#fff; border:none;
-    font-size:20px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center;
-    line-height:1; flex-shrink:0; transition:background .12s ease; }
-  .compare-add-btn:hover{ background:var(--violet-dark); }
   .compare-crumb{ font-size:13px; font-weight:600; color:var(--gray-500); cursor:pointer; }
   .compare-crumb:hover{ color:var(--violet-dark); }
   .compare-crumb.current{ color:var(--gray-900); cursor:default; }
@@ -1368,7 +1364,7 @@ function renderComparePicker(){
       <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Comparisons</div>
       <div class="actions">
         <button class="btn btn-ghost" onclick="exitCompare()">← Back to overview</button>
-        ${isAdmin ? `<button class="compare-add-btn" onclick="openCompareCreateModal()" title="New comparison">+</button>` : ''}
+        ${isAdmin ? `<button class="btn btn-primary" onclick="openCompareCreateModal()" title="New comparison">+</button>` : ''}
       </div>
     </div>
     ${state.compareSessions.length===0
