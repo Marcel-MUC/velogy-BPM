@@ -202,6 +202,40 @@
   .error-toast.show{ opacity:1; transform:translateX(0); }
   .error-toast .error-toast-icon{ color:var(--red); font-size:16px; flex-shrink:0; line-height:1.3; }
   .error-toast .error-toast-msg{ flex:1; white-space:pre-wrap; line-height:1.4; word-break:break-word; }
+
+  .compare-crumb{ font-size:13px; font-weight:600; color:var(--gray-500); cursor:pointer; }
+  .compare-crumb:hover{ color:var(--violet-dark); }
+  .compare-crumb.current{ color:var(--gray-900); cursor:default; }
+  .compare-crumb-sep{ font-size:13px; color:var(--gray-400); margin:0 6px; }
+  .compare-columns{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .compare-col-title{ font-size:12.5px; font-weight:700; color:var(--gray-700); text-transform:uppercase;
+    letter-spacing:.03em; margin-bottom:8px; }
+  .compare-item-row{ display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:8px 12px; border-radius:8px; border:1px solid var(--gray-200); background:#fff;
+    margin-bottom:6px; cursor:pointer; font-size:13.5px; transition:all .12s ease; }
+  .compare-item-row:hover{ background:var(--gray-50); }
+  .compare-item-row.sel{ background:var(--violet-light); border-color:var(--violet); }
+  .compare-pair-row{ display:flex; align-items:center; gap:10px; padding:9px 0;
+    border-bottom:1px solid var(--gray-100); font-size:13.5px; flex-wrap:wrap; }
+  .compare-pair-row:last-child{ border-bottom:none; }
+  .compare-pair-row.gap{ opacity:.75; }
+  .compare-pair-label{ flex:1; min-width:120px; font-weight:600; color:var(--gray-800); }
+  .compare-pair-arrow{ color:var(--gray-400); flex-shrink:0; }
+  .compare-pair-missing{ font-style:italic; font-weight:500; color:var(--gray-500); }
+  .compare-status-wrap{ position:relative; flex-shrink:0; }
+  .compare-status-badge{ font-size:11.5px; font-weight:600; padding:4px 10px; border-radius:999px;
+    border:none; cursor:pointer; white-space:nowrap; }
+  .compare-status-badge.match{ background:var(--green-bg); color:var(--green); }
+  .compare-status-badge.partial{ background:var(--violet-light); color:var(--violet-dark); }
+  .compare-status-badge.gap{ background:var(--red-bg); color:var(--red); }
+  .compare-status-menu{ position:absolute; top:calc(100% + 4px); right:0; z-index:20; background:#fff;
+    border:1px solid var(--gray-200); border-radius:10px; box-shadow:0 8px 24px rgba(20,15,50,.12);
+    min-width:220px; overflow:hidden; }
+  .compare-status-option{ padding:9px 12px; font-size:12.5px; cursor:pointer; border-left:3px solid transparent; }
+  .compare-status-option:hover{ background:var(--gray-50); }
+  .compare-status-option.match{ border-left-color:var(--green); }
+  .compare-status-option.partial{ border-left-color:var(--violet); }
+  .compare-status-option.gap{ border-left-color:var(--red); }
 </style>
 </head>
 <body>
@@ -249,6 +283,15 @@ let state = {
   addAccessLevel: 'view',
   addAccessGrantee: '',
   addAccessGranteeText: '',
+  comparePickerCompanyA: '',
+  comparePickerCompanyB: '',
+  compareSession: null,
+  comparePath: [],
+  compareItemsA: [],
+  compareItemsB: [],
+  compareLinks: [],
+  compareSelectedA: null,
+  compareStatusPickerFor: null,
   authError: ''
 };
 
@@ -396,7 +439,9 @@ async function doSignOut(){
     adminTab:'pending', adminPending:[], adminUsers:[],
     adminCompanyAccessRows:[], adminProcessAccessRows:[], adminAuditLog:[],
     adminGroups:[], adminGroupMembers:[], groupMembersModalFor:null,
-    accessTreeExpanded:{}, accessTreeSelected:null, addAccessLevel:'view', addAccessGrantee:'', addAccessGranteeText:'', authError:'' };
+    accessTreeExpanded:{}, accessTreeSelected:null, addAccessLevel:'view', addAccessGrantee:'', addAccessGranteeText:'',
+    comparePickerCompanyA:'', comparePickerCompanyB:'', compareSession:null, comparePath:[], compareItemsA:[], compareItemsB:[],
+    compareLinks:[], compareSelectedA:null, compareStatusPickerFor:null, authError:'' };
   render();
 }
 async function doForgotPassword(email){
@@ -1009,6 +1054,390 @@ async function addAccessToSelectedNode(){
   await loadAdminData(); render();
 }
 
+/* ================= COMPARE (admin: map two companies' trees) ================= */
+const COMPARE_LEVELS = ['l1','l2','l3','l4','l5'];
+const COMPARE_LEVEL_CONFIG = {
+  l1: { table:'processes', labelCol:'l1_name', parentCol:'company_id' },
+  l2: { table:'subprocesses', labelCol:'name', parentCol:'process_id' },
+  l3: { table:'steps', labelCol:'text', parentCol:'subprocess_id' },
+  l4: { table:'tasks', labelCol:'text', parentCol:'step_id' },
+  l5: { table:'work_instructions', labelCol:'text', parentCol:'task_id' }
+};
+const COMPARE_STATUS_LABELS = {
+  l2: { match:'Same structure', partial:'Different breakdown — mapping needed', gap:'One side has more' },
+  l3: { match:'Same count & order', partial:'Different order', gap:'Different step count' },
+  l4: { match:'Same tasks — plug & play', partial:'Different tasks — business logic differs', gap:'Different task count' },
+  l5: { match:'Same tool/fields', partial:'Workaround exists', gap:'Different tool/fields' }
+};
+function compareCurrentLevel(){ return COMPARE_LEVELS[state.comparePath.length]; }
+function compareNormalize(s){ return (s||'').trim().toLowerCase(); }
+function compareCompanyName(companyId){
+  const c = state.companies.find(x=>x.id===companyId);
+  return c ? c.name : companyId;
+}
+function compareItemLabel(side, itemId){
+  const items = side==='a' ? state.compareItemsA : state.compareItemsB;
+  const item = items.find(i=>i.id===itemId);
+  return item ? item.label : '';
+}
+function compareItemsForCompanyL1(companyId){
+  const c = state.companies.find(x=>x.id===companyId);
+  const items = (c && c.processes) ? c.processes.map(p=>({ id:p.id, label:p.l1_name || '' })) : [];
+  items.sort((x,y)=>x.label.localeCompare(y.label));
+  return items;
+}
+function computeCompareL1Matches(){
+  const itemsA = state.compareItemsA, itemsB = state.compareItemsB;
+  const usedA = new Set(), usedB = new Set(), matched = [];
+  itemsA.forEach(a=>{
+    if(compareNormalize(a.label)==='') return;
+    const b = itemsB.find(x=> !usedB.has(x.id) && compareNormalize(x.label)===compareNormalize(a.label));
+    if(b){ usedA.add(a.id); usedB.add(b.id); matched.push({ a, b }); }
+  });
+  return { matched, usedA, usedB };
+}
+async function fetchCompareItems(level, parentId){
+  if(!parentId) return [];
+  const cfg = COMPARE_LEVEL_CONFIG[level];
+  const { data, error } = await sb.from(cfg.table).select(`id, ${cfg.labelCol}, position`).eq(cfg.parentCol, parentId);
+  if(error){ showError(error.message); return []; }
+  const items = (data||[]).map(r=>({ id:r.id, label:r[cfg.labelCol] || '', position:r.position||0 }));
+  items.sort((x,y)=> x.position - y.position || x.label.localeCompare(y.label));
+  return items;
+}
+function openComparePicker(){
+  state.comparePickerCompanyA = '';
+  state.comparePickerCompanyB = '';
+  state.screen = 'compare-picker';
+  render();
+}
+function exitCompare(){
+  state.compareSession = null;
+  state.comparePath = [];
+  state.screen = 'companies';
+  loadCompanies().then(render);
+}
+async function startComparison(){
+  const aId = state.comparePickerCompanyA;
+  const bId = state.comparePickerCompanyB;
+  if(!aId || !bId){ toast('Please choose two companies.'); return; }
+  if(aId === bId){ toast('Please choose two different companies.'); return; }
+  const [companyAId, companyBId] = [aId, bId].sort();
+  const { data: existing, error: findErr } = await sb.from('mapping_sessions')
+    .select('id, company_a_id, company_b_id')
+    .eq('company_a_id', companyAId).eq('company_b_id', companyBId).maybeSingle();
+  if(findErr){ showError(findErr.message); return; }
+  let session = existing;
+  if(!session){
+    const { data, error } = await sb.from('mapping_sessions')
+      .insert({ company_a_id: companyAId, company_b_id: companyBId }).select().single();
+    if(error){ showError(error.message); return; }
+    session = data;
+  }
+  state.compareSession = session;
+  state.comparePath = [];
+  state.compareItemsA = []; state.compareItemsB = []; state.compareLinks = [];
+  state.screen = 'compare';
+  render();
+  await loadCompareLevel();
+}
+async function loadCompareLevel(){
+  const level = compareCurrentLevel();
+  const session = state.compareSession;
+  if(level === 'l1'){
+    state.compareItemsA = compareItemsForCompanyL1(session.company_a_id);
+    state.compareItemsB = compareItemsForCompanyL1(session.company_b_id);
+    state.compareLinks = [];
+    render();
+    return;
+  }
+  const parent = state.comparePath[state.comparePath.length - 1];
+  const [itemsA, itemsB] = await Promise.all([
+    fetchCompareItems(level, parent.itemA ? parent.itemA.id : null),
+    fetchCompareItems(level, parent.itemB ? parent.itemB.id : null)
+  ]);
+  state.compareItemsA = itemsA;
+  state.compareItemsB = itemsB;
+
+  const { data: linkRows, error } = await sb.from('mapping_links')
+    .select('*').eq('session_id', session.id).eq('level', level);
+  if(error){ showError(error.message); return; }
+  const idsA = new Set(itemsA.map(i=>i.id));
+  const idsB = new Set(itemsB.map(i=>i.id));
+  let links = (linkRows||[]).filter(l=>
+    (l.item_a_id && idsA.has(l.item_a_id)) || (l.item_b_id && idsB.has(l.item_b_id))
+  );
+
+  if(links.length === 0){
+    // First time this exact level+parent-pair has been viewed — auto-suggest
+    // exact-label matches. Once any link exists here (from this or a manual
+    // action), this never runs again for this parent pair.
+    const usedB = new Set();
+    const suggestions = [];
+    itemsA.forEach(a=>{
+      if(compareNormalize(a.label)==='') return;
+      const match = itemsB.find(b=> !usedB.has(b.id) && compareNormalize(b.label)===compareNormalize(a.label));
+      if(match){
+        usedB.add(match.id);
+        suggestions.push({ session_id: session.id, level, item_a_id:a.id, item_b_id:match.id, status:'match' });
+      }
+    });
+    if(suggestions.length){
+      const { data: inserted, error: insErr } = await sb.from('mapping_links').insert(suggestions).select();
+      if(insErr) showError(insErr.message);
+      else links = inserted || [];
+    }
+  }
+  state.compareLinks = links;
+  state.compareSelectedA = null;
+  render();
+}
+function compareSelectItem(side, itemId){
+  const alreadyLinked = state.compareLinks.some(l => (side==='a' ? l.item_a_id : l.item_b_id) === itemId);
+  if(alreadyLinked) return;
+  if(side === 'a'){
+    state.compareSelectedA = (state.compareSelectedA === itemId) ? null : itemId;
+    render();
+  } else {
+    if(!state.compareSelectedA){ toast('Select an item on the left first.'); return; }
+    createCompareLink(state.compareSelectedA, itemId);
+  }
+}
+async function createCompareLink(itemAId, itemBId){
+  const level = compareCurrentLevel();
+  const labelA = compareItemLabel('a', itemAId);
+  const labelB = compareItemLabel('b', itemBId);
+  const status = (compareNormalize(labelA)===compareNormalize(labelB) && compareNormalize(labelA)!=='') ? 'match' : 'partial';
+  const { data, error } = await sb.from('mapping_links')
+    .insert({ session_id: state.compareSession.id, level, item_a_id:itemAId, item_b_id:itemBId, status })
+    .select().single();
+  if(error){ showError(error.message); return; }
+  state.compareLinks.push(data);
+  state.compareSelectedA = null;
+  render();
+}
+async function compareMarkAsGap(side, itemId){
+  if(!await showConfirm('Mark this item as having no equivalent on the other side?')) return;
+  const level = compareCurrentLevel();
+  const payload = { session_id: state.compareSession.id, level, status:'gap',
+    item_a_id: side==='a' ? itemId : null, item_b_id: side==='b' ? itemId : null };
+  const { data, error } = await sb.from('mapping_links').insert(payload).select().single();
+  if(error){ showError(error.message); return; }
+  state.compareLinks.push(data);
+  state.compareSelectedA = null;
+  render();
+}
+function toggleCompareStatusPicker(linkId){
+  state.compareStatusPickerFor = (state.compareStatusPickerFor===linkId) ? null : linkId;
+  render();
+}
+async function setCompareLinkStatus(linkId, status){
+  const { data, error } = await sb.from('mapping_links')
+    .update({ status, updated_at: new Date().toISOString() }).eq('id', linkId).select().single();
+  if(error){ showError(error.message); return; }
+  const idx = state.compareLinks.findIndex(l=>l.id===linkId);
+  if(idx>-1) state.compareLinks[idx] = data;
+  state.compareStatusPickerFor = null;
+  render();
+}
+async function removeCompareLink(linkId){
+  if(!await showConfirm('Remove this mapping? Any deeper-level mappings under it will be removed too.')) return;
+  const link = state.compareLinks.find(l=>l.id===linkId);
+  if(!link) return;
+  const { error } = await sb.from('mapping_links').delete().eq('id', linkId);
+  if(error){ showError(error.message); return; }
+  await cascadeDeleteMappingLinks(state.compareSession.id, link.level, link.item_a_id, link.item_b_id);
+  state.compareLinks = state.compareLinks.filter(l=>l.id!==linkId);
+  render();
+}
+async function cascadeDeleteMappingLinks(sessionId, level, itemAId, itemBId){
+  const idx = COMPARE_LEVELS.indexOf(level);
+  if(idx === -1 || idx === COMPARE_LEVELS.length-1) return;
+  const nextLevel = COMPARE_LEVELS[idx+1];
+  const cfg = COMPARE_LEVEL_CONFIG[nextLevel];
+  let childIdsA = [], childIdsB = [];
+  if(itemAId){
+    const { data } = await sb.from(cfg.table).select('id').eq(cfg.parentCol, itemAId);
+    childIdsA = (data||[]).map(r=>r.id);
+  }
+  if(itemBId){
+    const { data } = await sb.from(cfg.table).select('id').eq(cfg.parentCol, itemBId);
+    childIdsB = (data||[]).map(r=>r.id);
+  }
+  if(childIdsA.length===0 && childIdsB.length===0) return;
+  const { data: candidates } = await sb.from('mapping_links')
+    .select('id, item_a_id, item_b_id').eq('session_id', sessionId).eq('level', nextLevel);
+  const toDelete = (candidates||[]).filter(l=>
+    (l.item_a_id && childIdsA.includes(l.item_a_id)) || (l.item_b_id && childIdsB.includes(l.item_b_id))
+  );
+  if(toDelete.length===0) return;
+  await sb.from('mapping_links').delete().in('id', toDelete.map(l=>l.id));
+  for(const link of toDelete){
+    await cascadeDeleteMappingLinks(sessionId, nextLevel, link.item_a_id, link.item_b_id);
+  }
+}
+function drillIntoCompare(itemA, itemB){
+  const level = compareCurrentLevel();
+  if(level === 'l5') return;
+  state.comparePath.push({ level, itemA, itemB });
+  state.compareSelectedA = null;
+  state.compareStatusPickerFor = null;
+  state.compareItemsA = []; state.compareItemsB = []; state.compareLinks = [];
+  render();
+  loadCompareLevel();
+}
+function drillIntoCompareByLink(linkId){
+  const link = state.compareLinks.find(l=>l.id===linkId);
+  if(!link || link.status==='gap' || !link.item_a_id || !link.item_b_id) return;
+  drillIntoCompare(
+    { id: link.item_a_id, label: compareItemLabel('a', link.item_a_id) },
+    { id: link.item_b_id, label: compareItemLabel('b', link.item_b_id) }
+  );
+}
+function drillIntoCompareL1(processAId, processBId){
+  drillIntoCompare(
+    { id: processAId, label: compareItemLabel('a', processAId) },
+    { id: processBId, label: compareItemLabel('b', processBId) }
+  );
+}
+function compareBreadcrumbTo(index){
+  state.comparePath = state.comparePath.slice(0, index+1);
+  state.compareSelectedA = null;
+  state.compareStatusPickerFor = null;
+  state.compareItemsA = []; state.compareItemsB = []; state.compareLinks = [];
+  render();
+  loadCompareLevel();
+}
+
+function renderComparePicker(){
+  return `${renderHeader()}
+  <div class="wrap">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px; padding-left:16px;">
+      <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Compare companies</div>
+      <button class="btn btn-ghost" onclick="exitCompare()">← Back to overview</button>
+    </div>
+    <div class="card" style="max-width:520px;">
+      <div class="card-title" style="margin-bottom:4px;">Select two companies</div>
+      <div class="card-hint" style="margin-bottom:14px;">Map their process trees against each other, level by level.</div>
+      <div class="field">
+        <label>Company A</label>
+        <select onchange="state.comparePickerCompanyA=this.value;">
+          <option value="">— choose —</option>
+          ${state.companies.map(c=>`<option value="${c.id}" ${state.comparePickerCompanyA===c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>Company B</label>
+        <select onchange="state.comparePickerCompanyB=this.value;">
+          <option value="">— choose —</option>
+          ${state.companies.map(c=>`<option value="${c.id}" ${state.comparePickerCompanyB===c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}
+        </select>
+      </div>
+      <button class="btn btn-primary" style="width:100%; margin-top:6px;" onclick="startComparison()">Start comparison</button>
+    </div>
+  </div>`;
+}
+function renderCompareBreadcrumb(){
+  const crumbs = [`<span class="compare-crumb ${state.comparePath.length===0?'current':''}" onclick="compareBreadcrumbTo(-1)">L1</span>`];
+  state.comparePath.forEach((p, idx)=>{
+    const isCurrent = idx === state.comparePath.length-1;
+    const label = `${p.itemA.label || '—'} / ${p.itemB.label || '—'}`;
+    crumbs.push(`<span class="compare-crumb-sep">›</span>`);
+    crumbs.push(`<span class="compare-crumb ${isCurrent?'current':''}" onclick="compareBreadcrumbTo(${idx})">${escapeHtml(label)}</span>`);
+  });
+  return crumbs.join('');
+}
+function renderCompareLinkedList(l1Matches){
+  const level = compareCurrentLevel();
+  if(level === 'l1'){
+    if(l1Matches.matched.length===0) return `<div class="empty-note">No matching mega-cycle names yet.</div>`;
+    return l1Matches.matched.map(m=>`
+      <div class="compare-pair-row">
+        <span class="compare-pair-label">${escapeHtml(m.a.label)}</span>
+        <span class="compare-pair-arrow">↔</span>
+        <span class="compare-pair-label">${escapeHtml(m.b.label)}</span>
+        <button class="btn btn-ghost" onclick="drillIntoCompareL1('${m.a.id}','${m.b.id}')">Open L2 ›</button>
+      </div>`).join('');
+  }
+  const links = state.compareLinks;
+  if(links.length===0) return `<div class="empty-note">No mappings yet — link items below.</div>`;
+  const labels = COMPARE_STATUS_LABELS[level];
+  const nextLevel = COMPARE_LEVELS[COMPARE_LEVELS.indexOf(level)+1];
+  return links.map(link=>{
+    const labelA = link.item_a_id ? compareItemLabel('a', link.item_a_id) : null;
+    const labelB = link.item_b_id ? compareItemLabel('b', link.item_b_id) : null;
+    const isGap = link.status==='gap' || !link.item_a_id || !link.item_b_id;
+    const drillable = !isGap && nextLevel;
+    const pickerOpen = state.compareStatusPickerFor === link.id;
+    return `<div class="compare-pair-row ${isGap?'gap':''}">
+      <span class="compare-pair-label">${labelA!=null ? escapeHtml(labelA) : `<span class="compare-pair-missing">— no equivalent —</span>`}</span>
+      <span class="compare-pair-arrow">↔</span>
+      <span class="compare-pair-label">${labelB!=null ? escapeHtml(labelB) : `<span class="compare-pair-missing">— no equivalent —</span>`}</span>
+      <span class="compare-status-wrap">
+        <button class="compare-status-badge ${link.status}" onclick="toggleCompareStatusPicker('${link.id}')">${escapeHtml(labels[link.status] || link.status)}</button>
+        ${pickerOpen ? `<div class="compare-status-menu">
+          ${['match','partial','gap'].map(s=>`<div class="compare-status-option ${s}" onclick="setCompareLinkStatus('${link.id}','${s}')">${escapeHtml(labels[s])}</div>`).join('')}
+        </div>` : ''}
+      </span>
+      ${drillable ? `<button class="btn btn-ghost" onclick="drillIntoCompareByLink('${link.id}')">Open ${nextLevel.toUpperCase()} ›</button>` : ''}
+      <button class="icon-btn" onclick="removeCompareLink('${link.id}')">✕</button>
+    </div>`;
+  }).join('');
+}
+function renderCompareUnlinkedColumn(side, l1Matches){
+  const level = compareCurrentLevel();
+  const items = side==='a' ? state.compareItemsA : state.compareItemsB;
+  let linkedIds;
+  if(level === 'l1'){
+    linkedIds = side==='a' ? l1Matches.usedA : l1Matches.usedB;
+  } else {
+    linkedIds = new Set(state.compareLinks.map(l=> side==='a' ? l.item_a_id : l.item_b_id).filter(Boolean));
+  }
+  const unlinked = items.filter(i=>!linkedIds.has(i.id));
+  if(unlinked.length===0) return `<div class="empty-note">Nothing unlinked.</div>`;
+  const clickable = level !== 'l1';
+  return unlinked.map(i=>{
+    const isSelected = side==='a' && state.compareSelectedA===i.id;
+    return `<div class="compare-item-row ${isSelected?'sel':''}" ${clickable ? `onclick="compareSelectItem('${side}','${i.id}')"` : ''}>
+      <span>${escapeHtml(i.label || '(untitled)')}</span>
+      ${clickable ? `<button class="btn btn-ghost" style="padding:4px 10px; font-size:12px; flex-shrink:0;" onclick="event.stopPropagation(); compareMarkAsGap('${side}','${i.id}')">No equivalent</button>` : ''}
+    </div>`;
+  }).join('');
+}
+function renderCompare(){
+  const session = state.compareSession;
+  if(!session) return `${renderHeader()}<div class="wrap"><div class="empty-note">No comparison session selected. <button class="link-btn" onclick="openComparePicker()">Start one</button></div></div>`;
+  const level = compareCurrentLevel();
+  const nameA = compareCompanyName(session.company_a_id);
+  const nameB = compareCompanyName(session.company_b_id);
+  const levelTitles = { l1:'Mega-cycles', l2:'Sub-processes', l3:'Process steps', l4:'Tasks', l5:'Work instructions' };
+  const l1Matches = level==='l1' ? computeCompareL1Matches() : null;
+  return `${renderHeader()}
+  <div class="wrap">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:12px; padding-left:16px;">
+      <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Compare: ${escapeHtml(nameA)} ↔ ${escapeHtml(nameB)}</div>
+      <button class="btn btn-ghost" onclick="exitCompare()">← Back to overview</button>
+    </div>
+    <div style="padding-left:16px; margin-bottom:14px;">${renderCompareBreadcrumb()}</div>
+    <div class="card">
+      <div class="card-title" style="margin-bottom:4px;">${levelTitles[level]} <span style="opacity:.5; font-weight:600;">(${level.toUpperCase()})</span></div>
+      <div class="card-hint" style="margin-bottom:16px;">Mapped pairs</div>
+      ${renderCompareLinkedList(l1Matches)}
+      <div class="subblock-title" style="margin:20px 0 10px;">${level==='l1' ? 'Only in one company' : 'Unlinked'}</div>
+      <div class="compare-columns">
+        <div class="compare-col">
+          <div class="compare-col-title">${escapeHtml(nameA)}</div>
+          ${renderCompareUnlinkedColumn('a', l1Matches)}
+        </div>
+        <div class="compare-col">
+          <div class="compare-col-title">${escapeHtml(nameB)}</div>
+          ${renderCompareUnlinkedColumn('b', l1Matches)}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
 /* ================= RENDER ================= */
 function render(){
   const app = document.getElementById('app');
@@ -1036,6 +1465,8 @@ function render(){
   else if(state.screen==='companies') app.innerHTML = renderCompanySelect();
   else if(state.screen==='admin') app.innerHTML = renderAdmin();
   else if(state.screen==='editor') renderEditor();
+  else if(state.screen==='compare-picker') app.innerHTML = renderComparePicker();
+  else if(state.screen==='compare') app.innerHTML = renderCompare();
 }
 
 function renderHeader(activeLabel){
@@ -1049,6 +1480,7 @@ function renderHeader(activeLabel){
     <div class="actions">
       <span class="pill ${roleClass}">${roleLabel}</span>
       <span style="font-size:12.5px; color:var(--gray-500);">${escapeHtml(state.profile.email || '')}</span>
+      ${state.profile.role==='admin' ? `<button class="btn btn-ghost" onclick="openComparePicker()">Compare</button>` : ''}
       ${state.profile.role==='admin' ? `<button class="btn btn-ghost" onclick="openAdmin()">Admin</button>` : ''}
       <button class="btn btn-ghost" onclick="doSignOut()">Logout</button>
     </div>
