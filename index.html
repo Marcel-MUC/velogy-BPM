@@ -215,6 +215,8 @@
     margin-bottom:6px; cursor:pointer; font-size:13.5px; transition:all .12s ease; }
   .compare-item-row:hover{ background:var(--gray-50); }
   .compare-item-row.sel{ background:var(--violet-light); border-color:var(--violet); }
+  .compare-item-row.static{ cursor:default; }
+  .compare-item-row.static:hover{ background:#fff; }
   .compare-pair-row{ display:flex; align-items:center; gap:10px; padding:9px 0;
     border-bottom:1px solid var(--gray-100); font-size:13.5px; flex-wrap:wrap; }
   .compare-pair-row:last-child{ border-bottom:none; }
@@ -285,6 +287,7 @@ let state = {
   addAccessGranteeText: '',
   comparePickerCompanyA: '',
   comparePickerCompanyB: '',
+  compareSessions: [],
   compareSession: null,
   comparePath: [],
   compareItemsA: [],
@@ -440,7 +443,7 @@ async function doSignOut(){
     adminCompanyAccessRows:[], adminProcessAccessRows:[], adminAuditLog:[],
     adminGroups:[], adminGroupMembers:[], groupMembersModalFor:null,
     accessTreeExpanded:{}, accessTreeSelected:null, addAccessLevel:'view', addAccessGrantee:'', addAccessGranteeText:'',
-    comparePickerCompanyA:'', comparePickerCompanyB:'', compareSession:null, comparePath:[], compareItemsA:[], compareItemsB:[],
+    comparePickerCompanyA:'', comparePickerCompanyB:'', compareSessions:[], compareSession:null, comparePath:[], compareItemsA:[], compareItemsB:[],
     compareLinks:[], compareSelectedA:null, compareStatusPickerFor:null, authError:'' };
   render();
 }
@@ -1105,11 +1108,32 @@ async function fetchCompareItems(level, parentId){
   items.sort((x,y)=> x.position - y.position || x.label.localeCompare(y.label));
   return items;
 }
+async function loadCompareSessions(){
+  const { data: sessions, error } = await sb.from('mapping_sessions')
+    .select('id, company_a_id, company_b_id, created_at')
+    .order('created_at', { ascending:false });
+  if(error){ showError(error.message); return; }
+  const { data: linkRows } = await sb.from('mapping_links').select('session_id');
+  const counts = {};
+  (linkRows||[]).forEach(r=>{ counts[r.session_id] = (counts[r.session_id]||0) + 1; });
+  state.compareSessions = (sessions||[]).map(s=>({ ...s, linkCount: counts[s.id] || 0 }));
+}
 function openComparePicker(){
   state.comparePickerCompanyA = '';
   state.comparePickerCompanyB = '';
   state.screen = 'compare-picker';
   render();
+  loadCompareSessions().then(render);
+}
+function openExistingCompareSession(sessionId){
+  const session = state.compareSessions.find(s=>s.id===sessionId);
+  if(!session) return;
+  state.compareSession = session;
+  state.comparePath = [];
+  state.compareItemsA = []; state.compareItemsB = []; state.compareLinks = [];
+  state.screen = 'compare';
+  render();
+  loadCompareLevel();
 }
 function exitCompare(){
   state.compareSession = null;
@@ -1309,13 +1333,34 @@ function compareBreadcrumbTo(index){
   loadCompareLevel();
 }
 
+function renderCompareSessionsList(){
+  const isAdmin = state.profile.role==='admin';
+  if(state.compareSessions.length===0){
+    return `<div class="empty-note">${isAdmin ? 'No comparisons yet — create one below.' : 'No comparisons yet.'}</div>`;
+  }
+  return state.compareSessions.map(s=>{
+    const nameA = compareCompanyName(s.company_a_id);
+    const nameB = compareCompanyName(s.company_b_id);
+    return `<div class="compare-item-row" onclick="openExistingCompareSession('${s.id}')">
+      <span>${escapeHtml(nameA)} ↔ ${escapeHtml(nameB)}</span>
+      <span style="font-size:12px; color:var(--gray-500); flex-shrink:0;">${s.linkCount} mapping${s.linkCount===1?'':'s'} · ${escapeHtml(new Date(s.created_at).toLocaleDateString())}</span>
+    </div>`;
+  }).join('');
+}
 function renderComparePicker(){
+  const isAdmin = state.profile.role==='admin';
   return `${renderHeader()}
   <div class="wrap">
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px; padding-left:16px;">
       <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Compare companies</div>
       <button class="btn btn-ghost" onclick="exitCompare()">← Back to overview</button>
     </div>
+    <div class="card" style="max-width:520px;">
+      <div class="card-title" style="margin-bottom:4px;">Existing comparisons</div>
+      <div class="card-hint" style="margin-bottom:14px;">${isAdmin ? 'Click one to continue it, or start a new comparison below.' : 'Click one to view it.'}</div>
+      ${renderCompareSessionsList()}
+    </div>
+    ${isAdmin ? `
     <div class="card" style="max-width:520px;">
       <div class="card-title" style="margin-bottom:4px;">Select two companies</div>
       <div class="card-hint" style="margin-bottom:14px;">Map their process trees against each other, level by level.</div>
@@ -1334,7 +1379,7 @@ function renderComparePicker(){
         </select>
       </div>
       <button class="btn btn-primary" style="width:100%; margin-top:6px;" onclick="startComparison()">Start comparison</button>
-    </div>
+    </div>` : ''}
   </div>`;
 }
 function renderCompareBreadcrumb(){
@@ -1347,7 +1392,7 @@ function renderCompareBreadcrumb(){
   });
   return crumbs.join('');
 }
-function renderCompareLinkedList(l1Matches){
+function renderCompareLinkedList(l1Matches, isAdmin){
   const level = compareCurrentLevel();
   if(level === 'l1'){
     if(l1Matches.matched.length===0) return `<div class="empty-note">No matching mega-cycle names yet.</div>`;
@@ -1360,7 +1405,7 @@ function renderCompareLinkedList(l1Matches){
       </div>`).join('');
   }
   const links = state.compareLinks;
-  if(links.length===0) return `<div class="empty-note">No mappings yet — link items below.</div>`;
+  if(links.length===0) return `<div class="empty-note">No mappings yet${isAdmin ? ' — link items below.' : '.'}</div>`;
   const labels = COMPARE_STATUS_LABELS[level];
   const nextLevel = COMPARE_LEVELS[COMPARE_LEVELS.indexOf(level)+1];
   return links.map(link=>{
@@ -1368,23 +1413,23 @@ function renderCompareLinkedList(l1Matches){
     const labelB = link.item_b_id ? compareItemLabel('b', link.item_b_id) : null;
     const isGap = link.status==='gap' || !link.item_a_id || !link.item_b_id;
     const drillable = !isGap && nextLevel;
-    const pickerOpen = state.compareStatusPickerFor === link.id;
+    const pickerOpen = isAdmin && state.compareStatusPickerFor === link.id;
     return `<div class="compare-pair-row ${isGap?'gap':''}">
       <span class="compare-pair-label">${labelA!=null ? escapeHtml(labelA) : `<span class="compare-pair-missing">— no equivalent —</span>`}</span>
       <span class="compare-pair-arrow">↔</span>
       <span class="compare-pair-label">${labelB!=null ? escapeHtml(labelB) : `<span class="compare-pair-missing">— no equivalent —</span>`}</span>
       <span class="compare-status-wrap">
-        <button class="compare-status-badge ${link.status}" onclick="toggleCompareStatusPicker('${link.id}')">${escapeHtml(labels[link.status] || link.status)}</button>
+        <button class="compare-status-badge ${link.status}" ${isAdmin ? `onclick="toggleCompareStatusPicker('${link.id}')"` : 'style="cursor:default;"'}>${escapeHtml(labels[link.status] || link.status)}</button>
         ${pickerOpen ? `<div class="compare-status-menu">
           ${['match','partial','gap'].map(s=>`<div class="compare-status-option ${s}" onclick="setCompareLinkStatus('${link.id}','${s}')">${escapeHtml(labels[s])}</div>`).join('')}
         </div>` : ''}
       </span>
       ${drillable ? `<button class="btn btn-ghost" onclick="drillIntoCompareByLink('${link.id}')">Open ${nextLevel.toUpperCase()} ›</button>` : ''}
-      <button class="icon-btn" onclick="removeCompareLink('${link.id}')">✕</button>
+      ${isAdmin ? `<button class="icon-btn" onclick="removeCompareLink('${link.id}')">✕</button>` : ''}
     </div>`;
   }).join('');
 }
-function renderCompareUnlinkedColumn(side, l1Matches){
+function renderCompareUnlinkedColumn(side, l1Matches, isAdmin){
   const level = compareCurrentLevel();
   const items = side==='a' ? state.compareItemsA : state.compareItemsB;
   let linkedIds;
@@ -1395,10 +1440,10 @@ function renderCompareUnlinkedColumn(side, l1Matches){
   }
   const unlinked = items.filter(i=>!linkedIds.has(i.id));
   if(unlinked.length===0) return `<div class="empty-note">Nothing unlinked.</div>`;
-  const clickable = level !== 'l1';
+  const clickable = isAdmin && level !== 'l1';
   return unlinked.map(i=>{
     const isSelected = side==='a' && state.compareSelectedA===i.id;
-    return `<div class="compare-item-row ${isSelected?'sel':''}" ${clickable ? `onclick="compareSelectItem('${side}','${i.id}')"` : ''}>
+    return `<div class="compare-item-row ${isSelected?'sel':''} ${clickable?'':'static'}" ${clickable ? `onclick="compareSelectItem('${side}','${i.id}')"` : ''}>
       <span>${escapeHtml(i.label || '(untitled)')}</span>
       ${clickable ? `<button class="btn btn-ghost" style="padding:4px 10px; font-size:12px; flex-shrink:0;" onclick="event.stopPropagation(); compareMarkAsGap('${side}','${i.id}')">No equivalent</button>` : ''}
     </div>`;
@@ -1412,6 +1457,7 @@ function renderCompare(){
   const nameB = compareCompanyName(session.company_b_id);
   const levelTitles = { l1:'Mega-cycles', l2:'Sub-processes', l3:'Process steps', l4:'Tasks', l5:'Work instructions' };
   const l1Matches = level==='l1' ? computeCompareL1Matches() : null;
+  const isAdmin = state.profile.role==='admin';
   return `${renderHeader()}
   <div class="wrap">
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:12px; padding-left:16px;">
@@ -1422,16 +1468,16 @@ function renderCompare(){
     <div class="card">
       <div class="card-title" style="margin-bottom:4px;">${levelTitles[level]} <span style="opacity:.5; font-weight:600;">(${level.toUpperCase()})</span></div>
       <div class="card-hint" style="margin-bottom:16px;">Mapped pairs</div>
-      ${renderCompareLinkedList(l1Matches)}
+      ${renderCompareLinkedList(l1Matches, isAdmin)}
       <div class="subblock-title" style="margin:20px 0 10px;">${level==='l1' ? 'Only in one company' : 'Unlinked'}</div>
       <div class="compare-columns">
         <div class="compare-col">
           <div class="compare-col-title">${escapeHtml(nameA)}</div>
-          ${renderCompareUnlinkedColumn('a', l1Matches)}
+          ${renderCompareUnlinkedColumn('a', l1Matches, isAdmin)}
         </div>
         <div class="compare-col">
           <div class="compare-col-title">${escapeHtml(nameB)}</div>
-          ${renderCompareUnlinkedColumn('b', l1Matches)}
+          ${renderCompareUnlinkedColumn('b', l1Matches, isAdmin)}
         </div>
       </div>
     </div>
@@ -1480,7 +1526,7 @@ function renderHeader(activeLabel){
     <div class="actions">
       <span class="pill ${roleClass}">${roleLabel}</span>
       <span style="font-size:12.5px; color:var(--gray-500);">${escapeHtml(state.profile.email || '')}</span>
-      ${state.profile.role==='admin' ? `<button class="btn btn-ghost" onclick="openComparePicker()">Compare</button>` : ''}
+      <button class="btn btn-ghost" onclick="openComparePicker()">Compare</button>
       ${state.profile.role==='admin' ? `<button class="btn btn-ghost" onclick="openAdmin()">Admin</button>` : ''}
       <button class="btn btn-ghost" onclick="doSignOut()">Logout</button>
     </div>
