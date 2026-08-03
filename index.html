@@ -1160,12 +1160,6 @@ function openExistingCompareSession(sessionId){
   render();
   loadCompareLevel();
 }
-function exitCompare(){
-  state.compareSession = null;
-  state.comparePath = [];
-  state.screen = 'companies';
-  loadCompanies().then(render);
-}
 async function startComparison(){
   const aId = state.comparePickerCompanyA;
   const bId = state.comparePickerCompanyB;
@@ -1444,7 +1438,7 @@ function renderComparePicker(){
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px; padding-left:16px;">
       <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Comparisons</div>
       <div class="actions">
-        <button class="btn btn-ghost" onclick="exitCompare()">← Back to overview</button>
+        <button class="btn btn-ghost" onclick="openComparePicker()">Home</button>
         ${isAdmin ? `<button class="btn btn-primary" onclick="openCompareCreateModal()" title="New comparison">+</button>` : ''}
       </div>
     </div>
@@ -1562,7 +1556,7 @@ function renderCompare(){
   const headerBlock = `
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:12px; padding-left:16px;">
       <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Compare: ${escapeHtml(nameA)} ↔ ${escapeHtml(nameB)}</div>
-      <button class="btn btn-ghost" onclick="exitCompare()">← Back to overview</button>
+      <button class="btn btn-ghost" onclick="openComparePicker()">Home</button>
     </div>
     <div class="compare-breadcrumb-bar">${renderCompareBreadcrumb()}</div>`;
 
