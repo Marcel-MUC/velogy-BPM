@@ -1368,8 +1368,8 @@ function renderCompareSessionsList(){
   return state.compareSessions.map(s=>{
     const nameA = compareCompanyName(s.company_a_id);
     const nameB = compareCompanyName(s.company_b_id);
-    return `<div class="compare-item-row" onclick="openExistingCompareSession('${s.id}')">
-      <span>${escapeHtml(nameA)} ↔ ${escapeHtml(nameB)}</span>
+    return `<div class="dash-item" style="cursor:pointer;" onclick="openExistingCompareSession('${s.id}')">
+      <h3 style="margin:0;">${escapeHtml(nameA)} ↔ ${escapeHtml(nameB)}</h3>
       <span style="font-size:12px; color:var(--gray-500); flex-shrink:0;">${s.linkCount} mapping${s.linkCount===1?'':'s'} · ${escapeHtml(new Date(s.created_at).toLocaleDateString())}</span>
     </div>`;
   }).join('');
@@ -1387,7 +1387,7 @@ function renderComparePicker(){
     </div>
     ${state.compareSessions.length===0
       ? `<div class="empty-note" style="padding-left:16px;">${isAdmin ? 'No comparisons yet — click + to create one.' : 'No comparisons yet.'}</div>`
-      : `<div class="card">${renderCompareSessionsList()}</div>`}
+      : `<div class="dash-list">${renderCompareSessionsList()}</div>`}
   </div>
   ${state.showCompareCreateModal ? renderCompareCreateModal() : ''}`;
 }
