@@ -315,6 +315,10 @@ let state = {
   compareItemsB: [],
   compareTargetItems: [],
   compareBuildCompletion: null,
+  compareSourceChildrenA: new Set(),
+  compareSourceChildrenB: new Set(),
+  compareTargetChildParents: new Set(),
+  compareChildCompletions: new Set(),
   authError: ''
 };
 
@@ -464,7 +468,9 @@ async function doSignOut(){
     adminGroups:[], adminGroupMembers:[], groupMembersModalFor:null,
     accessTreeExpanded:{}, accessTreeSelected:null, addAccessLevel:'view', addAccessGrantee:'', addAccessGranteeText:'',
     comparePickerCompanyA:'', comparePickerCompanyB:'', showCompareCreateModal:false, compareSessions:[], compareSession:null, comparePath:[], compareItemsA:[], compareItemsB:[],
-    compareTargetItems:[], compareBuildCompletion:null, authError:'' };
+    compareTargetItems:[], compareBuildCompletion:null,
+    compareSourceChildrenA:new Set(), compareSourceChildrenB:new Set(), compareTargetChildParents:new Set(), compareChildCompletions:new Set(),
+    authError:'' };
   render();
 }
 async function doForgotPassword(email){
@@ -1155,7 +1161,7 @@ function openExistingCompareSession(sessionId){
   if(!session) return;
   state.compareSession = session;
   state.comparePath = [];
-  state.compareItemsA = []; state.compareItemsB = []; state.compareTargetItems = []; state.compareBuildCompletion = null;
+  resetDrillUiState();
   state.screen = 'compare';
   render();
   loadCompareLevel();
@@ -1179,7 +1185,7 @@ async function startComparison(){
   }
   state.compareSession = session;
   state.comparePath = [];
-  state.compareItemsA = []; state.compareItemsB = []; state.compareTargetItems = []; state.compareBuildCompletion = null;
+  resetDrillUiState();
   state.showCompareCreateModal = false;
   state.screen = 'compare';
   render();
@@ -1278,7 +1284,54 @@ async function loadCompareLevel(){
   }
   state.compareTargetItems = targetItems;
   state.compareBuildCompletion = await fetchBuildCompletion(scope);
+
+  const nextLevel = COMPARE_LEVELS[COMPARE_LEVELS.indexOf(level)+1];
+  const targetIds = targetItems.map(t=>t.id);
+  const [childrenA, childrenB, targetChildParents, childCompletions] = await Promise.all([
+    fetchChildExistenceSet(nextLevel, itemsA.map(i=>i.id)),
+    fetchChildExistenceSet(nextLevel, itemsB.map(i=>i.id)),
+    fetchTargetChildParentSet(nextLevel, targetIds),
+    fetchChildCompletionSet(nextLevel, targetIds)
+  ]);
+  state.compareSourceChildrenA = childrenA;
+  state.compareSourceChildrenB = childrenB;
+  state.compareTargetChildParents = targetChildParents;
+  state.compareChildCompletions = childCompletions;
   render();
+}
+async function fetchChildExistenceSet(nextLevel, parentIds){
+  if(!nextLevel || parentIds.length===0) return new Set();
+  const cfg = COMPARE_LEVEL_CONFIG[nextLevel];
+  const { data, error } = await sb.from(cfg.table).select(cfg.parentCol).in(cfg.parentCol, parentIds);
+  if(error){ showError(error.message); return new Set(); }
+  return new Set((data||[]).map(r=>r[cfg.parentCol]));
+}
+async function fetchTargetChildParentSet(nextLevel, parentTargetIds){
+  if(!nextLevel || parentTargetIds.length===0) return new Set();
+  const { data, error } = await sb.from('target_items').select('parent_target_item_id')
+    .eq('level', nextLevel).in('parent_target_item_id', parentTargetIds);
+  if(error){ showError(error.message); return new Set(); }
+  return new Set((data||[]).map(r=>r.parent_target_item_id));
+}
+async function fetchChildCompletionSet(nextLevel, parentTargetIds){
+  if(!nextLevel || parentTargetIds.length===0) return new Set();
+  const { data, error } = await sb.from('build_completions').select('parent_target_item_id')
+    .eq('level', nextLevel).in('parent_target_item_id', parentTargetIds);
+  if(error){ showError(error.message); return new Set(); }
+  return new Set((data||[]).map(r=>r.parent_target_item_id));
+}
+function isTargetItemDrillable(t){
+  if(!t.source_item_a_id && !t.source_item_b_id) return true;
+  if(state.compareTargetChildParents.has(t.id)) return true;
+  if(t.source_item_a_id && state.compareSourceChildrenA.has(t.source_item_a_id)) return true;
+  if(t.source_item_b_id && state.compareSourceChildrenB.has(t.source_item_b_id)) return true;
+  return false;
+}
+function findFinishBlocker(){
+  const level = compareCurrentLevel();
+  const nextLevel = COMPARE_LEVELS[COMPARE_LEVELS.indexOf(level)+1];
+  if(!nextLevel) return null;
+  return state.compareTargetItems.find(t => isTargetItemDrillable(t) && !state.compareChildCompletions.has(t.id)) || null;
 }
 function onSourceDragStart(event, side, itemId){
   event.dataTransfer.setData('text/plain', JSON.stringify({ side, itemId }));
@@ -1369,6 +1422,8 @@ async function removeTargetItem(targetItemId){
 }
 async function finishLevel(){
   if(state.compareBuildCompletion) return;
+  const blocker = findFinishBlocker();
+  if(blocker){ toast('Finish the deeper level for "'+(blocker.name||'(untitled)')+'" first.'); return; }
   const scope = currentBuildScope();
   const payload = {
     session_id: state.compareSession.id, level: scope.level,
@@ -1393,6 +1448,8 @@ async function reopenLevel(){
 function resetDrillUiState(){
   state.compareItemsA = []; state.compareItemsB = [];
   state.compareTargetItems = []; state.compareBuildCompletion = null;
+  state.compareSourceChildrenA = new Set(); state.compareSourceChildrenB = new Set();
+  state.compareTargetChildParents = new Set(); state.compareChildCompletions = new Set();
 }
 function drillIntoCompareL1(processAId, processBId){
   state.comparePath.push({
@@ -1524,7 +1581,7 @@ function renderCompareTargetColumn(isAdmin){
     const onlyB = !!(!t.source_item_a_id && t.source_item_b_id);
     const statusClass = both ? 'match' : (onlyA||onlyB) ? 'partial' : 'new';
     const statusLabel = both ? 'Merged' : onlyA ? 'Adopted from A' : onlyB ? 'Adopted from B' : 'New';
-    const drillable = !!nextLevel && (t.source_item_a_id || t.source_item_b_id);
+    const drillable = !!nextLevel && isTargetItemDrillable(t);
     return `<div class="compare-target-card" ${isAdmin ? `ondragover="allowDrop(event)" ondrop="onDropOnTargetItem(event,'${t.id}')"` : ''}>
       ${isAdmin
         ? `<input type="text" class="compare-target-name" value="${escapeHtml(t.name||'')}" placeholder="Name…" oninput="onTargetItemNameInput('${t.id}', this.value)">`
@@ -1579,6 +1636,8 @@ function renderCompare(){
 
   const levelTitles = { l2:'Sub-processes', l3:'Process steps', l4:'Tasks', l5:'Work instructions' };
   const finished = !!state.compareBuildCompletion;
+  const nextLevelForFinish = COMPARE_LEVELS[COMPARE_LEVELS.indexOf(level)+1];
+  const finishBlocker = (!finished && nextLevelForFinish) ? findFinishBlocker() : null;
   return `${renderHeader()}
   <div class="wrap">
     ${headerBlock}
@@ -1588,7 +1647,9 @@ function renderCompare(){
         <span>Drag items from either side onto the target column to build it.</span>
         ${isAdmin ? (finished
           ? `<button class="btn btn-ghost" onclick="reopenLevel()">Reopen this level</button>`
-          : `<button class="btn btn-primary" onclick="finishLevel()">Finish this level</button>`) : ''}
+          : finishBlocker
+            ? `<button class="btn btn-primary" disabled title="Finish ${nextLevelForFinish.toUpperCase()} for &quot;${escapeHtml(finishBlocker.name || '(untitled)')}&quot; first">Finish this level</button>`
+            : `<button class="btn btn-primary" onclick="finishLevel()">Finish this level</button>`) : ''}
       </div>
       <div class="compare-build-columns">
         <div class="compare-col"><div class="compare-col-title">${escapeHtml(nameA)}</div>${renderCompareSourceColumn('a', isAdmin)}</div>
