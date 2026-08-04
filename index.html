@@ -965,31 +965,40 @@ async function loadAdminStatistics(){
   state.adminStatsLoading = false;
   render();
 }
+function countProcessLevels(p){
+  const counts = { l2:0, l3:0, l4:0, l5:0 };
+  (p.subprocesses||[]).forEach(sp=>{
+    if(sp.name && sp.name.trim()) counts.l2++;
+    (sp.steps||[]).forEach(st=>{
+      if(st.text && st.text.trim()) counts.l3++;
+      (st.tasks||[]).forEach(t=>{
+        if(t.text && t.text.trim()) counts.l4++;
+        (t.work_instructions||[]).forEach(wi=>{
+          if(wi.text && wi.text.trim()) counts.l5++;
+        });
+      });
+    });
+  });
+  return counts;
+}
 function computeCaptureStats(companies){
   const totals = { l1:0, l2:0, l3:0, l4:0, l5:0 };
+  const byProcess = [];
   const byCompany = companies.map(c=>{
     const counts = { l1:0, l2:0, l3:0, l4:0, l5:0 };
     (c.processes||[]).forEach(p=>{
       if(p.l1_name && p.l1_name.trim()) counts.l1++;
-      (p.subprocesses||[]).forEach(sp=>{
-        if(sp.name && sp.name.trim()) counts.l2++;
-        (sp.steps||[]).forEach(st=>{
-          if(st.text && st.text.trim()) counts.l3++;
-          (st.tasks||[]).forEach(t=>{
-            if(t.text && t.text.trim()) counts.l4++;
-            (t.work_instructions||[]).forEach(wi=>{
-              if(wi.text && wi.text.trim()) counts.l5++;
-            });
-          });
-        });
-      });
+      const pc = countProcessLevels(p);
+      counts.l2 += pc.l2; counts.l3 += pc.l3; counts.l4 += pc.l4; counts.l5 += pc.l5;
+      byProcess.push({ companyName: c.name, l1Name: p.l1_name || '(untitled)', ...pc });
     });
     totals.l1 += counts.l1; totals.l2 += counts.l2; totals.l3 += counts.l3;
     totals.l4 += counts.l4; totals.l5 += counts.l5;
     return { name: c.name, ...counts };
   });
   byCompany.sort((a,b)=>a.name.localeCompare(b.name));
-  return { totals, byCompany };
+  byProcess.sort((a,b)=> a.companyName.localeCompare(b.companyName) || a.l1Name.localeCompare(b.l1Name));
+  return { totals, byCompany, byProcess };
 }
 async function computeSessionMappingStats(session){
   const [{ data: itemRows }, { data: compRows }] = await Promise.all([
@@ -2586,12 +2595,22 @@ function renderAdminStatistics(){
       <div class="stat"><div class="l">L4</div><div class="n">${cs.totals.l4}</div></div>
       <div class="stat"><div class="l">L5</div><div class="n">${cs.totals.l5}</div></div>
     </div>
+    <div class="card-hint" style="margin:16px 0 8px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; font-size:11.5px;">By company</div>
     ${cs.byCompany.length===0 ? `<div class="empty-note">No companies yet.</div>` : `
     <table class="admin-table"><thead><tr>
       <th>Company</th><th>L1</th><th>L2</th><th>L3</th><th>L4</th><th>L5</th>
     </tr></thead><tbody>
       ${cs.byCompany.map(c=>`<tr>
         <td>${escapeHtml(c.name)}</td><td>${c.l1}</td><td>${c.l2}</td><td>${c.l3}</td><td>${c.l4}</td><td>${c.l5}</td>
+      </tr>`).join('')}
+    </tbody></table>`}
+    <div class="card-hint" style="margin:20px 0 8px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; font-size:11.5px;">By company + mega-cycle</div>
+    ${cs.byProcess.length===0 ? `<div class="empty-note">No mega-cycles yet.</div>` : `
+    <table class="admin-table"><thead><tr>
+      <th>Company</th><th>Mega-cycle</th><th>L2</th><th>L3</th><th>L4</th><th>L5</th>
+    </tr></thead><tbody>
+      ${cs.byProcess.map(p=>`<tr>
+        <td>${escapeHtml(p.companyName)}</td><td>${escapeHtml(p.l1Name)}</td><td>${p.l2}</td><td>${p.l3}</td><td>${p.l4}</td><td>${p.l5}</td>
       </tr>`).join('')}
     </tbody></table>`}
     <div class="subblock-title" style="margin:24px 0 10px;">Process Mapping progress</div>
