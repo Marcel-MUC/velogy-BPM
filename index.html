@@ -229,7 +229,9 @@
     letter-spacing:.03em; margin-bottom:10px; }
   .compare-item-row{ display:flex; align-items:center; justify-content:space-between; gap:8px;
     padding:8px 12px; border-radius:8px; border:1px solid var(--gray-200); background:#fff;
-    margin-bottom:6px; cursor:pointer; font-size:13.5px; transition:all .12s ease; }
+    margin-bottom:6px; cursor:grab; font-size:13.5px; transition:all .12s ease; }
+  .compare-item-row:active{ cursor:grabbing; }
+  .compare-item-row .no-drag{ cursor:pointer; }
   .compare-item-row:last-child{ margin-bottom:0; }
   .compare-item-row:hover{ background:var(--violet-light); border-color:var(--violet-light); }
   .compare-item-row.sel{ background:var(--violet-light); border-color:var(--violet); }
@@ -255,18 +257,13 @@
     padding:10px 12px; margin-bottom:8px; transition:background-color .12s ease, border-color .12s ease;
     cursor:grab; }
   .compare-target-card:active{ cursor:grabbing; }
-  .compare-target-card .no-drag{ cursor:auto; }
+  .compare-target-card .no-drag{ cursor:pointer; }
   .compare-target-card:last-of-type{ margin-bottom:10px; }
   .compare-target-card.drop-active{ background:var(--violet-light); border-color:var(--violet); }
   .compare-target-name{ font-weight:700; font-size:13.5px; border:none; padding:2px 0; width:100%; }
   .compare-target-name:focus{ outline:none; box-shadow:none; border-bottom:1px solid var(--violet); }
   .compare-target-name-static{ font-weight:700; font-size:13.5px; color:var(--gray-800); }
   .compare-target-footer{ display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap; }
-
-  .drag-handle{ cursor:grab; color:var(--gray-400); font-size:13px; padding:0 2px; flex-shrink:0;
-    line-height:1; user-select:none; }
-  .drag-handle:hover{ color:var(--gray-700); }
-  .drag-handle:active{ cursor:grabbing; }
   .compare-item-row.dragging, .compare-target-card.dragging{ opacity:.35; }
   .compare-dropzone{ transition:background-color .15s ease; border-radius:10px; }
   .compare-dropzone.drop-active{ background:var(--violet-light); }
@@ -1484,13 +1481,14 @@ function onZoneDrop(event, zoneEl, zoneType){
     else if(payload.kind==='target') reorderTargetItem(payload.targetItemId, insertIndex);
   }
 }
-function onCardMouseDown(event, cardEl){
-  // The whole card is draggable, but a press starting on a .no-drag child
-  // (name input, Open/remove buttons) should behave as a normal click/focus,
-  // not a drag — native drag-eligibility is decided from the `draggable`
-  // attribute at press time, so toggle it off just for this press rather
-  // than trying to intercept the drag itself once it's underway.
-  cardEl.draggable = !event.target.closest('.no-drag');
+function onDraggableMouseDown(event, el){
+  // The whole row/card is draggable, but a press starting on a .no-drag
+  // child (name input, status pill, Open/remove buttons) should behave as
+  // a normal click/focus, not a drag — native drag-eligibility is decided
+  // from the `draggable` attribute at press time, so toggle it off just
+  // for this press rather than trying to intercept the drag itself once
+  // it's underway.
+  el.draggable = !event.target.closest('.no-drag');
 }
 function onCardDragOver(event, targetItemId){
   const payload = dragState.payload;
@@ -1783,8 +1781,8 @@ function renderCompareSourceColumn(side, isAdmin){
   const finished = !!state.compareBuildCompletion;
   const zoneType = side==='a' ? 'source-a' : 'source-b';
   const rowsHtml = remaining.map(i=>`
-    <div class="compare-item-row ${isAdmin?'':'static'}" data-drag-id="${i.id}">
-      ${isAdmin ? `<span class="drag-handle" draggable="true" ondragstart="onRowDragStart(event,'source','${side}','${i.id}')" ondragend="onRowDragEnd()">⠿</span>` : ''}
+    <div class="compare-item-row ${isAdmin?'':'static'}" data-drag-id="${i.id}"
+      ${isAdmin ? `draggable="true" onmousedown="onDraggableMouseDown(event, this)" ondragstart="onRowDragStart(event,'source','${side}','${i.id}')" ondragend="onRowDragEnd()"` : ''}>
       <span style="flex:1;">${escapeHtml(i.label || '(untitled)')}</span>
       <span class="compare-status-badge ${finished?'gap':'open'}">${finished?'Eliminated':'Open'}</span>
     </div>`).join('');
@@ -1808,7 +1806,7 @@ function renderCompareTargetColumn(isAdmin){
     const statusLabel = both ? 'Merged' : onlyA ? 'Adopted from A' : onlyB ? 'Adopted from B' : 'New';
     const drillable = !!nextLevel && isTargetItemDrillable(t);
     return `<div class="compare-target-card" data-drag-id="${t.id}"
-      ${isAdmin ? `draggable="true" onmousedown="onCardMouseDown(event, this)" ondragstart="onRowDragStart(event,'target',null,'${t.id}')" ondragend="onRowDragEnd()" ondragover="onCardDragOver(event,'${t.id}')" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,'${t.id}')"` : ''}>
+      ${isAdmin ? `draggable="true" onmousedown="onDraggableMouseDown(event, this)" ondragstart="onRowDragStart(event,'target',null,'${t.id}')" ondragend="onRowDragEnd()" ondragover="onCardDragOver(event,'${t.id}')" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,'${t.id}')"` : ''}>
       ${isAdmin
         ? `<input type="text" class="compare-target-name no-drag" value="${escapeHtml(t.name||'')}" placeholder="Name…" oninput="onTargetItemNameInput('${t.id}', this.value)">`
         : `<div class="compare-target-name-static">${escapeHtml(t.name || '(untitled)')}</div>`}
