@@ -1821,12 +1821,14 @@ function renderCompareSourceColumn(side, isAdmin){
 function renderCompareTargetColumn(isAdmin){
   const level = compareCurrentLevel();
   const nextLevel = COMPARE_LEVELS[COMPARE_LEVELS.indexOf(level)+1];
+  const nameA = escapeHtml(compareCompanyName(state.compareSession.company_a_id));
+  const nameB = escapeHtml(compareCompanyName(state.compareSession.company_b_id));
   const cardsHtml = state.compareTargetItems.map(t=>{
     const both = !!(t.source_item_a_id && t.source_item_b_id);
     const onlyA = !!(t.source_item_a_id && !t.source_item_b_id);
     const onlyB = !!(!t.source_item_a_id && t.source_item_b_id);
     const statusClass = both ? 'match' : (onlyA||onlyB) ? 'partial' : 'new';
-    const statusLabel = both ? 'Merged' : onlyA ? 'Adopted from A' : onlyB ? 'Adopted from B' : 'New';
+    const statusLabel = both ? 'Merged' : onlyA ? `Adopted from ${nameA}` : onlyB ? `Adopted from ${nameB}` : 'New';
     const drillable = !!nextLevel && isTargetItemDrillable(t);
     return `<div class="compare-target-card" data-drag-id="${t.id}"
       ${isAdmin ? `draggable="true" onmousedown="onDraggableMouseDown(event, this)" ondragstart="onRowDragStart(event,'target',null,'${t.id}')" ondragend="onRowDragEnd()"` : ''}>
