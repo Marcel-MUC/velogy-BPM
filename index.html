@@ -252,12 +252,26 @@
   .compare-build-columns{ display:grid; grid-template-columns:1fr 1fr 1.2fr; gap:16px; }
   .compare-target-dropzone{ min-height:60px; border:1.5px dashed var(--gray-400); border-radius:12px; padding:10px; }
   .compare-target-card{ background:#fff; border:1px solid var(--gray-200); border-radius:10px;
-    padding:10px 12px; margin-bottom:8px; }
+    padding:10px 12px; margin-bottom:8px; transition:background-color .12s ease, border-color .12s ease; }
   .compare-target-card:last-of-type{ margin-bottom:10px; }
+  .compare-target-card.drop-active{ background:var(--violet-light); border-color:var(--violet); }
   .compare-target-name{ font-weight:700; font-size:13.5px; border:none; padding:2px 0; width:100%; }
   .compare-target-name:focus{ outline:none; box-shadow:none; border-bottom:1px solid var(--violet); }
   .compare-target-name-static{ font-weight:700; font-size:13.5px; color:var(--gray-800); }
   .compare-target-footer{ display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap; }
+
+  .drag-handle{ cursor:grab; color:var(--gray-400); font-size:13px; padding:0 2px; flex-shrink:0;
+    line-height:1; user-select:none; }
+  .drag-handle:hover{ color:var(--gray-700); }
+  .drag-handle:active{ cursor:grabbing; }
+  .compare-item-row.dragging, .compare-target-card.dragging{ opacity:.35; }
+  .compare-dropzone{ transition:background-color .15s ease; border-radius:10px; }
+  .compare-dropzone.drop-active{ background:var(--violet-light); }
+  .compare-dropzone.drop-invalid{ background:var(--red-bg); cursor:not-allowed; }
+  .compare-source-dropzone{ max-height:420px; overflow-y:auto; padding:2px; }
+  .compare-target-dropzone{ max-height:420px; overflow-y:auto; }
+  .drag-placeholder{ height:38px; border:1.5px dashed var(--violet); border-radius:8px;
+    background:var(--violet-light); margin-bottom:6px; opacity:.7; flex-shrink:0; }
 </style>
 </head>
 <body>
@@ -1333,36 +1347,227 @@ function findFinishBlocker(){
   if(!nextLevel) return null;
   return state.compareTargetItems.find(t => isTargetItemDrillable(t) && !state.compareChildCompletions.has(t.id)) || null;
 }
-function onSourceDragStart(event, side, itemId){
-  event.dataTransfer.setData('text/plain', JSON.stringify({ side, itemId }));
+/* ---------- Generic drag-and-drop engine (source reorder, target reorder, source-to-target) ----------
+   Desktop-only, native HTML5 DnD. All of this runs via direct DOM writes during
+   the drag (never through the app's render()), since a full re-render mid-drag
+   would tear down the very elements the browser is dragging. state.compare* is
+   only updated (and render() called) once a drop actually completes. */
+let dragState = { payload:null, rowEl:null, placeholder:null };
+let autoScrollRAF = null, autoScrollEl = null, autoScrollSpeed = 0;
+
+function onRowDragStart(event, kind, side, itemId){
+  dragState.payload = kind==='source' ? { kind, side, itemId } : { kind, targetItemId:itemId };
+  const rowEl = event.currentTarget.closest('[data-drag-id]');
+  dragState.rowEl = rowEl;
   event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', itemId);
+  dragState.placeholder = document.createElement('div');
+  dragState.placeholder.className = 'drag-placeholder';
+  if(rowEl){
+    const rect = rowEl.getBoundingClientRect();
+    event.dataTransfer.setDragImage(rowEl, event.clientX - rect.left, event.clientY - rect.top);
+    // Deferred a frame so the browser captures its drag-image snapshot before
+    // the row left behind in the list dims — otherwise the floating image dims too.
+    requestAnimationFrame(()=> rowEl.classList.add('dragging'));
+  }
 }
-function allowDrop(event){ event.preventDefault(); }
-function readDragPayload(event){
-  const raw = event.dataTransfer.getData('text/plain');
-  if(!raw) return null;
-  try { return JSON.parse(raw); } catch(e){ return null; }
+function onRowDragEnd(){
+  if(dragState.rowEl) dragState.rowEl.classList.remove('dragging');
+  if(dragState.placeholder && dragState.placeholder.parentNode) dragState.placeholder.parentNode.removeChild(dragState.placeholder);
+  document.querySelectorAll('.compare-dropzone.drop-active, .compare-dropzone.drop-invalid, .compare-target-card.drop-active')
+    .forEach(el=>el.classList.remove('drop-active','drop-invalid'));
+  stopAutoScroll();
+  dragState = { payload:null, rowEl:null, placeholder:null };
 }
-async function onDropOnTargetItem(event, targetItemId){
+function isDropCompatible(zoneType, payload){
+  if(!payload) return false;
+  if(zoneType==='source-a') return payload.kind==='source' && payload.side==='a';
+  if(zoneType==='source-b') return payload.kind==='source' && payload.side==='b';
+  if(zoneType==='target') return true;
+  return false;
+}
+function dragRows(container){
+  return Array.from(container.querySelectorAll('[data-drag-id]')).filter(r=>!r.classList.contains('dragging'));
+}
+function getDragAfterElement(container, y){
+  let closest = { offset:-Infinity, element:null };
+  dragRows(container).forEach(row=>{
+    const box = row.getBoundingClientRect();
+    const offset = y - box.top - box.height/2;
+    if(offset < 0 && offset > closest.offset) closest = { offset, element: row };
+  });
+  return closest.element;
+}
+function movePlaceholder(container, afterEl){
+  const rows = dragRows(container);
+  const firstRects = new Map(rows.map(r=>[r, r.getBoundingClientRect()]));
+  if(afterEl) container.insertBefore(dragState.placeholder, afterEl);
+  else container.appendChild(dragState.placeholder);
+  // FLIP: animate siblings sliding to their new spot instead of snapping.
+  rows.forEach(r=>{
+    const first = firstRects.get(r);
+    const last = r.getBoundingClientRect();
+    const dy = first.top - last.top;
+    if(dy){
+      r.style.transition = 'none';
+      r.style.transform = `translateY(${dy}px)`;
+      requestAnimationFrame(()=>{
+        r.style.transition = 'transform .15s ease';
+        r.style.transform = '';
+      });
+    }
+  });
+}
+function placeholderIndex(zoneEl){
+  if(!dragState.placeholder || dragState.placeholder.parentNode !== zoneEl) return dragRows(zoneEl).length;
+  let idx = 0;
+  for(const child of zoneEl.children){
+    if(child === dragState.placeholder) break;
+    if(child.hasAttribute('data-drag-id') && !child.classList.contains('dragging')) idx++;
+  }
+  return idx;
+}
+function updateAutoScroll(container, clientY){
+  const rect = container.getBoundingClientRect();
+  const threshold = 36;
+  let speed = 0;
+  if(clientY - rect.top < threshold) speed = -((threshold - (clientY - rect.top)) / 3 + 1);
+  else if(rect.bottom - clientY < threshold) speed = (threshold - (rect.bottom - clientY)) / 3 + 1;
+  autoScrollEl = container;
+  autoScrollSpeed = speed;
+  if(speed !== 0 && !autoScrollRAF) startAutoScroll();
+  if(speed === 0) stopAutoScroll();
+}
+function startAutoScroll(){
+  const step = ()=>{
+    if(autoScrollEl && autoScrollSpeed) autoScrollEl.scrollTop += autoScrollSpeed;
+    autoScrollRAF = requestAnimationFrame(step);
+  };
+  autoScrollRAF = requestAnimationFrame(step);
+}
+function stopAutoScroll(){
+  if(autoScrollRAF){ cancelAnimationFrame(autoScrollRAF); autoScrollRAF = null; }
+  autoScrollEl = null; autoScrollSpeed = 0;
+}
+function onZoneDragOver(event, zoneEl, zoneType){
+  if(!dragState.payload) return;
+  const compatible = isDropCompatible(zoneType, dragState.payload);
+  zoneEl.classList.toggle('drop-invalid', !compatible);
+  zoneEl.classList.toggle('drop-active', compatible);
+  if(!compatible){ event.dataTransfer.dropEffect = 'none'; stopAutoScroll(); return; }
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  updateAutoScroll(zoneEl, event.clientY);
+  movePlaceholder(zoneEl, getDragAfterElement(zoneEl, event.clientY));
+}
+function onZoneDragLeave(event, zoneEl){
+  if(zoneEl.contains(event.relatedTarget)) return;
+  zoneEl.classList.remove('drop-active','drop-invalid');
+  if(autoScrollEl===zoneEl) stopAutoScroll();
+}
+function onZoneDrop(event, zoneEl, zoneType){
+  event.preventDefault();
+  const payload = dragState.payload;
+  const compatible = payload && isDropCompatible(zoneType, payload);
+  const insertIndex = compatible ? placeholderIndex(zoneEl) : null;
+  zoneEl.classList.remove('drop-active','drop-invalid');
+  if(dragState.placeholder && dragState.placeholder.parentNode) dragState.placeholder.parentNode.removeChild(dragState.placeholder);
+  stopAutoScroll();
+  if(!compatible) return;
+  if(zoneType==='source-a' || zoneType==='source-b'){
+    if(payload.kind==='source') reorderSourceColumn(payload.side, payload.itemId, insertIndex);
+  } else if(zoneType==='target'){
+    if(payload.kind==='source') createTargetItemAtPosition(payload.side, payload.itemId, insertIndex);
+    else if(payload.kind==='target') reorderTargetItem(payload.targetItemId, insertIndex);
+  }
+}
+function onCardDragOver(event, targetItemId){
+  const payload = dragState.payload;
+  if(!payload || payload.kind !== 'source') return;
   event.preventDefault();
   event.stopPropagation();
-  const payload = readDragPayload(event);
-  if(!payload) return;
+  event.currentTarget.classList.add('drop-active');
+}
+function onCardDragLeave(event){
+  event.currentTarget.classList.remove('drop-active');
+}
+async function onCardDrop(event, targetItemId){
+  const payload = dragState.payload;
+  if(!payload || payload.kind !== 'source') return;
+  event.preventDefault();
+  event.stopPropagation();
+  event.currentTarget.classList.remove('drop-active');
+  if(dragState.placeholder && dragState.placeholder.parentNode) dragState.placeholder.parentNode.removeChild(dragState.placeholder);
+  stopAutoScroll();
   await attachSourceToTarget(payload.side, payload.itemId, targetItemId);
 }
-async function onDropOnNewTarget(event){
-  event.preventDefault();
-  const payload = readDragPayload(event);
-  if(!payload) return;
-  const { side, itemId } = payload;
+function reorderSourceColumn(side, itemId, insertIndex){
+  const list = side==='a' ? state.compareItemsA : state.compareItemsB;
+  const fromIdx = list.findIndex(i=>i.id===itemId);
+  if(fromIdx===-1) return;
+  const [moved] = list.splice(fromIdx,1);
+  const idx = Math.max(0, Math.min(insertIndex, list.length));
+  list.splice(idx, 0, moved);
+  render();
+  const table = COMPARE_LEVEL_CONFIG[compareCurrentLevel()].table;
+  debounced('source-reorder-'+side, async ()=>{
+    const updates = [];
+    list.forEach((item, i)=>{
+      if(item.position !== i){
+        item.position = i;
+        updates.push(sb.from(table).update({ position:i }).eq('id', item.id));
+      }
+    });
+    if(updates.length){
+      const results = await Promise.all(updates);
+      const failed = results.find(r=>r.error);
+      reportSaveResult(failed ? failed.error : null, failed ? null : [1]);
+    }
+  });
+}
+function reorderTargetItem(targetItemId, insertIndex){
+  const list = state.compareTargetItems;
+  const fromIdx = list.findIndex(t=>t.id===targetItemId);
+  if(fromIdx===-1) return;
+  const [moved] = list.splice(fromIdx,1);
+  const idx = Math.max(0, Math.min(insertIndex, list.length));
+  list.splice(idx, 0, moved);
+  render();
+  debounced('target-reorder', async ()=>{
+    const updates = [];
+    list.forEach((item, i)=>{
+      if(item.position !== i){
+        item.position = i;
+        updates.push(sb.from('target_items').update({ position:i }).eq('id', item.id));
+      }
+    });
+    if(updates.length){
+      const results = await Promise.all(updates);
+      const failed = results.find(r=>r.error);
+      reportSaveResult(failed ? failed.error : null, failed ? null : [1]);
+    }
+  });
+}
+async function createTargetItemAtPosition(side, itemId, insertIndex){
   const label = compareItemLabel(side, itemId);
   await detachSourceFromAllTargets(side, itemId);
   const scope = currentBuildScope();
-  const newPayload = buildTargetItemPayload(scope, label, side==='a'?itemId:null, side==='b'?itemId:null, state.compareTargetItems.length);
-  const { data, error } = await sb.from('target_items').insert(newPayload).select().single();
+  const payload = buildTargetItemPayload(scope, label, side==='a'?itemId:null, side==='b'?itemId:null, insertIndex);
+  const { data, error } = await sb.from('target_items').insert(payload).select().single();
   if(error){ showError(error.message); return; }
-  state.compareTargetItems.push(data);
+  const idx = Math.max(0, Math.min(insertIndex, state.compareTargetItems.length));
+  state.compareTargetItems.splice(idx, 0, data);
   render();
+  debounced('target-reorder', async ()=>{
+    const updates = [];
+    state.compareTargetItems.forEach((item, i)=>{
+      if(item.position !== i){
+        item.position = i;
+        updates.push(sb.from('target_items').update({ position:i }).eq('id', item.id));
+      }
+    });
+    if(updates.length) await Promise.all(updates);
+  });
 }
 async function attachSourceToTarget(side, itemId, targetItemId){
   await detachSourceFromAllTargets(side, itemId, targetItemId);
@@ -1564,28 +1769,41 @@ function renderCompareSourceColumn(side, isAdmin){
   const field = side==='a' ? 'source_item_a_id' : 'source_item_b_id';
   const attached = new Set(state.compareTargetItems.map(t=>t[field]).filter(Boolean));
   const remaining = items.filter(i=>!attached.has(i.id));
-  if(remaining.length===0) return `<div class="empty-note">Nothing left here.</div>`;
   const finished = !!state.compareBuildCompletion;
-  return remaining.map(i=>`
-    <div class="compare-item-row ${isAdmin?'':'static'}" ${isAdmin ? `draggable="true" ondragstart="onSourceDragStart(event,'${side}','${i.id}')"` : ''}>
-      <span>${escapeHtml(i.label || '(untitled)')}</span>
+  const zoneType = side==='a' ? 'source-a' : 'source-b';
+  const rowsHtml = remaining.map(i=>`
+    <div class="compare-item-row ${isAdmin?'':'static'}" data-drag-id="${i.id}">
+      ${isAdmin ? `<span class="drag-handle" draggable="true" ondragstart="onRowDragStart(event,'source','${side}','${i.id}')" ondragend="onRowDragEnd()">⠿</span>` : ''}
+      <span style="flex:1;">${escapeHtml(i.label || '(untitled)')}</span>
       <span class="compare-status-badge ${finished?'gap':'open'}">${finished?'Eliminated':'Open'}</span>
     </div>`).join('');
+  const empty = remaining.length===0 ? `<div class="empty-note">Nothing left here.</div>` : '';
+  if(!isAdmin) return `<div class="compare-source-dropzone">${rowsHtml}${empty}</div>`;
+  return `<div class="compare-dropzone compare-source-dropzone" data-zone="${zoneType}"
+    ondragover="onZoneDragOver(event, this, '${zoneType}')"
+    ondragleave="onZoneDragLeave(event, this)"
+    ondrop="onZoneDrop(event, this, '${zoneType}')">
+    ${rowsHtml}${empty}
+  </div>`;
 }
 function renderCompareTargetColumn(isAdmin){
   const level = compareCurrentLevel();
   const nextLevel = COMPARE_LEVELS[COMPARE_LEVELS.indexOf(level)+1];
-  const rows = state.compareTargetItems.map(t=>{
+  const cardsHtml = state.compareTargetItems.map(t=>{
     const both = !!(t.source_item_a_id && t.source_item_b_id);
     const onlyA = !!(t.source_item_a_id && !t.source_item_b_id);
     const onlyB = !!(!t.source_item_a_id && t.source_item_b_id);
     const statusClass = both ? 'match' : (onlyA||onlyB) ? 'partial' : 'new';
     const statusLabel = both ? 'Merged' : onlyA ? 'Adopted from A' : onlyB ? 'Adopted from B' : 'New';
     const drillable = !!nextLevel && isTargetItemDrillable(t);
-    return `<div class="compare-target-card" ${isAdmin ? `ondragover="allowDrop(event)" ondrop="onDropOnTargetItem(event,'${t.id}')"` : ''}>
-      ${isAdmin
-        ? `<input type="text" class="compare-target-name" value="${escapeHtml(t.name||'')}" placeholder="Name…" oninput="onTargetItemNameInput('${t.id}', this.value)">`
-        : `<div class="compare-target-name-static">${escapeHtml(t.name || '(untitled)')}</div>`}
+    return `<div class="compare-target-card" data-drag-id="${t.id}"
+      ${isAdmin ? `ondragover="onCardDragOver(event,'${t.id}')" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,'${t.id}')"` : ''}>
+      <div style="display:flex; align-items:center; gap:6px;">
+        ${isAdmin ? `<span class="drag-handle" draggable="true" ondragstart="onRowDragStart(event,'target',null,'${t.id}')" ondragend="onRowDragEnd()">⠿</span>` : ''}
+        ${isAdmin
+          ? `<input type="text" class="compare-target-name" value="${escapeHtml(t.name||'')}" placeholder="Name…" oninput="onTargetItemNameInput('${t.id}', this.value)">`
+          : `<div class="compare-target-name-static">${escapeHtml(t.name || '(untitled)')}</div>`}
+      </div>
       <div class="compare-target-footer">
         <span class="compare-status-badge ${statusClass}">${statusLabel}</span>
         ${drillable ? `<button class="btn btn-ghost" onclick="drillIntoTargetItem('${t.id}')">Open ${nextLevel.toUpperCase()} ›</button>` : ''}
@@ -1594,13 +1812,19 @@ function renderCompareTargetColumn(isAdmin){
     </div>`;
   }).join('');
   const empty = state.compareTargetItems.length===0 ? `<div class="empty-note">Nothing built yet — drag items here.</div>` : '';
-  return `<div class="compare-target-dropzone" ${isAdmin ? `ondragover="allowDrop(event)" ondrop="onDropOnNewTarget(event)"` : ''}>
-    ${rows}${empty}
-    ${isAdmin ? `<div class="row-input" style="margin-top:4px;">
+  const zoneHtml = isAdmin
+    ? `<div class="compare-dropzone compare-target-dropzone" data-zone="target"
+        ondragover="onZoneDragOver(event, this, 'target')"
+        ondragleave="onZoneDragLeave(event, this)"
+        ondrop="onZoneDrop(event, this, 'target')">
+        ${cardsHtml}${empty}
+      </div>`
+    : `<div class="compare-target-dropzone">${cardsHtml}${empty}</div>`;
+  return `${zoneHtml}
+    ${isAdmin ? `<div class="row-input" style="margin-top:8px;">
       <input type="text" id="new-target-item-input" placeholder="+ new item">
       <button class="btn btn-ghost" onclick="createBlankTargetItem()">Add</button>
-    </div>` : ''}
-  </div>`;
+    </div>` : ''}`;
 }
 function renderCompare(){
   const session = state.compareSession;
