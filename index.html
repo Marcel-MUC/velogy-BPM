@@ -945,11 +945,11 @@ async function loadAdminStatistics(){
   render();
   const { data: companies, error } = await sb.from('companies').select(`
       id, name,
-      processes ( id, l1_name,
-        subprocesses ( id, name,
-          steps ( id, text,
-            tasks ( id, text,
-              work_instructions ( id, text )
+      processes ( id, l1_name, created_at,
+        subprocesses ( id, name, created_at,
+          steps ( id, text, created_at,
+            tasks ( id, text, created_at,
+              work_instructions ( id, text, created_at )
             )
           )
         )
@@ -965,16 +965,29 @@ async function loadAdminStatistics(){
   state.adminStatsLoading = false;
   render();
 }
-function countProcessLevels(p){
+function statsTimeWindows(){
+  // Local browser time throughout, per spec — not UTC.
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const daysSinceMonday = (startOfToday.getDay() + 6) % 7; // Mon->0 ... Sun->6
+  const weekStart = new Date(startOfToday);
+  weekStart.setDate(weekStart.getDate() - daysSinceMonday);
+  const lastWeekStart = new Date(weekStart);
+  lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+  return { weekStart, lastWeekStart, monthStart, yearStart };
+}
+function countProcessLevels(p, bumpRecent){
   const counts = { l2:0, l3:0, l4:0, l5:0 };
   (p.subprocesses||[]).forEach(sp=>{
-    if(sp.name && sp.name.trim()) counts.l2++;
+    if(sp.name && sp.name.trim()){ counts.l2++; if(bumpRecent) bumpRecent('l2', sp.created_at); }
     (sp.steps||[]).forEach(st=>{
-      if(st.text && st.text.trim()) counts.l3++;
+      if(st.text && st.text.trim()){ counts.l3++; if(bumpRecent) bumpRecent('l3', st.created_at); }
       (st.tasks||[]).forEach(t=>{
-        if(t.text && t.text.trim()) counts.l4++;
+        if(t.text && t.text.trim()){ counts.l4++; if(bumpRecent) bumpRecent('l4', t.created_at); }
         (t.work_instructions||[]).forEach(wi=>{
-          if(wi.text && wi.text.trim()) counts.l5++;
+          if(wi.text && wi.text.trim()){ counts.l5++; if(bumpRecent) bumpRecent('l5', wi.created_at); }
         });
       });
     });
@@ -983,22 +996,48 @@ function countProcessLevels(p){
 }
 function computeCaptureStats(companies){
   const totals = { l1:0, l2:0, l3:0, l4:0, l5:0 };
-  const byProcess = [];
-  const byCompany = companies.map(c=>{
-    const counts = { l1:0, l2:0, l3:0, l4:0, l5:0 };
+  const byCompanyMap = new Map();
+  const byMegaCycleMap = new Map();
+  const { weekStart, lastWeekStart, monthStart, yearStart } = statsTimeWindows();
+  const recentlyAdded = {
+    l1:{week:0,lastWeek:0,month:0,year:0}, l2:{week:0,lastWeek:0,month:0,year:0},
+    l3:{week:0,lastWeek:0,month:0,year:0}, l4:{week:0,lastWeek:0,month:0,year:0},
+    l5:{week:0,lastWeek:0,month:0,year:0}
+  };
+  function bumpRecent(level, createdAt){
+    if(!createdAt) return;
+    const d = new Date(createdAt);
+    if(d >= weekStart) recentlyAdded[level].week++;
+    else if(d >= lastWeekStart) recentlyAdded[level].lastWeek++;
+    if(d >= monthStart) recentlyAdded[level].month++;
+    if(d >= yearStart) recentlyAdded[level].year++;
+  }
+
+  companies.forEach(c=>{
+    if(!byCompanyMap.has(c.name)) byCompanyMap.set(c.name, { name:c.name, l1:0, l2:0, l3:0, l4:0, l5:0 });
+    const companyCounts = byCompanyMap.get(c.name);
     (c.processes||[]).forEach(p=>{
-      if(p.l1_name && p.l1_name.trim()) counts.l1++;
-      const pc = countProcessLevels(p);
-      counts.l2 += pc.l2; counts.l3 += pc.l3; counts.l4 += pc.l4; counts.l5 += pc.l5;
-      byProcess.push({ companyName: c.name, l1Name: p.l1_name || '(untitled)', ...pc });
+      const named = p.l1_name && p.l1_name.trim();
+      if(named){
+        companyCounts.l1++; totals.l1++;
+        bumpRecent('l1', p.created_at);
+      }
+      const pc = countProcessLevels(p, bumpRecent);
+      companyCounts.l2 += pc.l2; companyCounts.l3 += pc.l3; companyCounts.l4 += pc.l4; companyCounts.l5 += pc.l5;
+      totals.l2 += pc.l2; totals.l3 += pc.l3; totals.l4 += pc.l4; totals.l5 += pc.l5;
+
+      if(named){
+        const key = p.l1_name.trim();
+        if(!byMegaCycleMap.has(key)) byMegaCycleMap.set(key, { name:key, l1:0, l2:0, l3:0, l4:0, l5:0 });
+        const mc = byMegaCycleMap.get(key);
+        mc.l1++; mc.l2 += pc.l2; mc.l3 += pc.l3; mc.l4 += pc.l4; mc.l5 += pc.l5;
+      }
     });
-    totals.l1 += counts.l1; totals.l2 += counts.l2; totals.l3 += counts.l3;
-    totals.l4 += counts.l4; totals.l5 += counts.l5;
-    return { name: c.name, ...counts };
   });
-  byCompany.sort((a,b)=>a.name.localeCompare(b.name));
-  byProcess.sort((a,b)=> a.companyName.localeCompare(b.companyName) || a.l1Name.localeCompare(b.l1Name));
-  return { totals, byCompany, byProcess };
+
+  const byCompany = Array.from(byCompanyMap.values()).sort((a,b)=>a.name.localeCompare(b.name));
+  const byMegaCycle = Array.from(byMegaCycleMap.values()).sort((a,b)=>a.name.localeCompare(b.name));
+  return { totals, byCompany, byMegaCycle, recentlyAdded };
 }
 async function computeSessionMappingStats(session){
   const [{ data: itemRows }, { data: compRows }] = await Promise.all([
@@ -2595,7 +2634,23 @@ function renderAdminStatistics(){
       <div class="stat"><div class="l">L4</div><div class="n">${cs.totals.l4}</div></div>
       <div class="stat"><div class="l">L5</div><div class="n">${cs.totals.l5}</div></div>
     </div>
-    <div class="card-hint" style="margin:16px 0 8px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; font-size:11.5px;">By company</div>
+    <div class="card-hint" style="margin:16px 0 8px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; font-size:11.5px;">Recently added</div>
+    <table class="admin-table"><thead><tr>
+      <th>Level</th><th>This week</th><th>This month</th><th>This year</th>
+    </tr></thead><tbody>
+      ${['l1','l2','l3','l4','l5'].map(level=>{
+        const r = cs.recentlyAdded[level];
+        const delta = r.week - r.lastWeek;
+        const trend = delta===0 ? '' : `<span style="font-size:11px; margin-left:6px; color:${delta>0?'var(--green)':'var(--red)'};">${delta>0?'+':''}${delta} vs last week</span>`;
+        return `<tr>
+          <td>${level.toUpperCase()}</td>
+          <td>${r.week}${trend}</td>
+          <td>${r.month}</td>
+          <td>${r.year}</td>
+        </tr>`;
+      }).join('')}
+    </tbody></table>
+    <div class="card-hint" style="margin:20px 0 8px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; font-size:11.5px;">By company</div>
     ${cs.byCompany.length===0 ? `<div class="empty-note">No companies yet.</div>` : `
     <table class="admin-table"><thead><tr>
       <th>Company</th><th>L1</th><th>L2</th><th>L3</th><th>L4</th><th>L5</th>
@@ -2604,13 +2659,13 @@ function renderAdminStatistics(){
         <td>${escapeHtml(c.name)}</td><td>${c.l1}</td><td>${c.l2}</td><td>${c.l3}</td><td>${c.l4}</td><td>${c.l5}</td>
       </tr>`).join('')}
     </tbody></table>`}
-    <div class="card-hint" style="margin:20px 0 8px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; font-size:11.5px;">By company + mega-cycle</div>
-    ${cs.byProcess.length===0 ? `<div class="empty-note">No mega-cycles yet.</div>` : `
+    <div class="card-hint" style="margin:20px 0 8px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; font-size:11.5px;">By mega-cycle</div>
+    ${cs.byMegaCycle.length===0 ? `<div class="empty-note">No mega-cycles yet.</div>` : `
     <table class="admin-table"><thead><tr>
-      <th>Company</th><th>Mega-cycle</th><th>L2</th><th>L3</th><th>L4</th><th>L5</th>
+      <th>Mega-cycle</th><th>L1</th><th>L2</th><th>L3</th><th>L4</th><th>L5</th>
     </tr></thead><tbody>
-      ${cs.byProcess.map(p=>`<tr>
-        <td>${escapeHtml(p.companyName)}</td><td>${escapeHtml(p.l1Name)}</td><td>${p.l2}</td><td>${p.l3}</td><td>${p.l4}</td><td>${p.l5}</td>
+      ${cs.byMegaCycle.map(mc=>`<tr>
+        <td>${escapeHtml(mc.name)}</td><td>${mc.l1}</td><td>${mc.l2}</td><td>${mc.l3}</td><td>${mc.l4}</td><td>${mc.l5}</td>
       </tr>`).join('')}
     </tbody></table>`}
     <div class="subblock-title" style="margin:24px 0 10px;">Process Mapping progress</div>
