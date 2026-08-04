@@ -314,6 +314,9 @@ let state = {
   adminGroups: [],
   adminGroupMembers: [],
   groupMembersModalFor: null,
+  adminStatsLoading: false,
+  adminCaptureStats: null,
+  adminMappingStats: null,
   accessTreeExpanded: {},
   accessTreeSelected: null,
   addAccessLevel: 'view',
@@ -480,6 +483,7 @@ async function doSignOut(){
     adminTab:'pending', adminPending:[], adminUsers:[],
     adminCompanyAccessRows:[], adminProcessAccessRows:[], adminAuditLog:[],
     adminGroups:[], adminGroupMembers:[], groupMembersModalFor:null,
+    adminStatsLoading:false, adminCaptureStats:null, adminMappingStats:null,
     accessTreeExpanded:{}, accessTreeSelected:null, addAccessLevel:'view', addAccessGrantee:'', addAccessGranteeText:'',
     comparePickerCompanyA:'', comparePickerCompanyB:'', showCompareCreateModal:false, compareSessions:[], compareSession:null, comparePath:[], compareItemsA:[], compareItemsB:[],
     compareTargetItems:[], compareBuildCompletion:null,
@@ -936,6 +940,154 @@ async function loadAdminData(){
   const { data: memberRows } = await sb.from('group_members').select('id, group_id, profile_id');
   state.adminGroupMembers = memberRows || [];
 }
+async function loadAdminStatistics(){
+  state.adminStatsLoading = true;
+  render();
+  const { data: companies, error } = await sb.from('companies').select(`
+      id, name,
+      processes ( id, l1_name,
+        subprocesses ( id, name,
+          steps ( id, text,
+            tasks ( id, text,
+              work_instructions ( id, text )
+            )
+          )
+        )
+      )
+    `).order('name');
+  if(error){ showError(error.message); state.adminStatsLoading = false; render(); return; }
+  state.adminCaptureStats = computeCaptureStats(companies || []);
+
+  const { data: sessions, error: sessErr } = await sb.from('mapping_sessions')
+    .select('id, company_a_id, company_b_id, created_at').order('created_at', { ascending:false });
+  if(sessErr){ showError(sessErr.message); state.adminStatsLoading = false; render(); return; }
+  state.adminMappingStats = await Promise.all((sessions||[]).map(computeSessionMappingStats));
+  state.adminStatsLoading = false;
+  render();
+}
+function computeCaptureStats(companies){
+  const totals = { l1:0, l2:0, l3:0, l4:0, l5:0 };
+  const byCompany = companies.map(c=>{
+    const counts = { l1:0, l2:0, l3:0, l4:0, l5:0 };
+    (c.processes||[]).forEach(p=>{
+      if(p.l1_name && p.l1_name.trim()) counts.l1++;
+      (p.subprocesses||[]).forEach(sp=>{
+        if(sp.name && sp.name.trim()) counts.l2++;
+        (sp.steps||[]).forEach(st=>{
+          if(st.text && st.text.trim()) counts.l3++;
+          (st.tasks||[]).forEach(t=>{
+            if(t.text && t.text.trim()) counts.l4++;
+            (t.work_instructions||[]).forEach(wi=>{
+              if(wi.text && wi.text.trim()) counts.l5++;
+            });
+          });
+        });
+      });
+    });
+    totals.l1 += counts.l1; totals.l2 += counts.l2; totals.l3 += counts.l3;
+    totals.l4 += counts.l4; totals.l5 += counts.l5;
+    return { name: c.name, ...counts };
+  });
+  byCompany.sort((a,b)=>a.name.localeCompare(b.name));
+  return { totals, byCompany };
+}
+async function computeSessionMappingStats(session){
+  const [{ data: itemRows }, { data: compRows }] = await Promise.all([
+    sb.from('target_items').select('*').eq('session_id', session.id),
+    sb.from('build_completions').select('*').eq('session_id', session.id)
+  ]);
+  const items = itemRows || [];
+  const comps = compRows || [];
+  const itemsById = new Map(items.map(t=>[t.id, t]));
+  const nameA = compareCompanyName(session.company_a_id);
+  const nameB = compareCompanyName(session.company_b_id);
+
+  // Same status derivation the build tool's cards use — never a separate rule.
+  let merged=0, adoptedA=0, adoptedB=0, brandNew=0;
+  items.forEach(t=>{
+    const { statusLabel } = deriveTargetItemStatus(t, nameA, nameB);
+    if(statusLabel==='Merged') merged++;
+    else if(statusLabel===`Adopted from ${nameA}`) adoptedA++;
+    else if(statusLabel===`Adopted from ${nameB}`) adoptedB++;
+    else brandNew++;
+  });
+
+  // "Building has started" scopes = every distinct (level, parent) that has
+  // at least one target_item or build_completions row — same definition the
+  // build tool itself effectively uses (a scope with neither is never shown
+  // as anything but blank, since it's never been opened/auto-suggested).
+  const scopeMap = new Map();
+  function addScope(level, parentTargetItemId, l1A, l1B){
+    const key = `${level}|${parentTargetItemId||''}|${l1A||''}|${l1B||''}`;
+    if(!scopeMap.has(key)) scopeMap.set(key, { level, parentTargetItemId, l1ProcessAId:l1A, l1ProcessBId:l1B });
+  }
+  items.forEach(t=> addScope(t.level, t.parent_target_item_id, t.l1_process_a_id, t.l1_process_b_id));
+  comps.forEach(c=> addScope(c.level, c.parent_target_item_id, c.l1_process_a_id, c.l1_process_b_id));
+
+  const scopes = Array.from(scopeMap.values()).map(scope=>{
+    let parentAId, parentBId;
+    if(scope.parentTargetItemId){
+      const parentItem = itemsById.get(scope.parentTargetItemId);
+      parentAId = parentItem ? parentItem.source_item_a_id : null;
+      parentBId = parentItem ? parentItem.source_item_b_id : null;
+    } else {
+      parentAId = scope.l1ProcessAId;
+      parentBId = scope.l1ProcessBId;
+    }
+    const finished = comps.some(c=> c.level===scope.level && c.parent_target_item_id===scope.parentTargetItemId
+      && c.l1_process_a_id===scope.l1ProcessAId && c.l1_process_b_id===scope.l1ProcessBId);
+    const scopeItems = items.filter(t=> t.level===scope.level && t.parent_target_item_id===scope.parentTargetItemId
+      && t.l1_process_a_id===scope.l1ProcessAId && t.l1_process_b_id===scope.l1ProcessBId);
+    return {
+      ...scope, parentAId, parentBId, finished,
+      attachedA: new Set(scopeItems.map(t=>t.source_item_a_id).filter(Boolean)),
+      attachedB: new Set(scopeItems.map(t=>t.source_item_b_id).filter(Boolean))
+    };
+  });
+
+  // Batch one query per level per side (covering every scope's parent id at
+  // once), instead of one query per scope — same batching technique as the
+  // build tool's own next-level-existence check.
+  let openCount = 0, eliminatedCount = 0;
+  for(const level of ['l2','l3','l4','l5']){
+    const levelScopes = scopes.filter(s=>s.level===level);
+    if(levelScopes.length===0) continue;
+    const cfg = COMPARE_LEVEL_CONFIG[level];
+    const parentAIds = [...new Set(levelScopes.map(s=>s.parentAId).filter(Boolean))];
+    const parentBIds = [...new Set(levelScopes.map(s=>s.parentBId).filter(Boolean))];
+    const [rowsA, rowsB] = await Promise.all([
+      parentAIds.length ? sb.from(cfg.table).select(`id, ${cfg.parentCol}`).in(cfg.parentCol, parentAIds) : Promise.resolve({data:[]}),
+      parentBIds.length ? sb.from(cfg.table).select(`id, ${cfg.parentCol}`).in(cfg.parentCol, parentBIds) : Promise.resolve({data:[]})
+    ]);
+    const byParentA = new Map();
+    (rowsA.data||[]).forEach(r=>{
+      const key = r[cfg.parentCol];
+      if(!byParentA.has(key)) byParentA.set(key, []);
+      byParentA.get(key).push(r.id);
+    });
+    const byParentB = new Map();
+    (rowsB.data||[]).forEach(r=>{
+      const key = r[cfg.parentCol];
+      if(!byParentB.has(key)) byParentB.set(key, []);
+      byParentB.get(key).push(r.id);
+    });
+    levelScopes.forEach(s=>{
+      const idsA = s.parentAId ? (byParentA.get(s.parentAId)||[]) : [];
+      const idsB = s.parentBId ? (byParentB.get(s.parentBId)||[]) : [];
+      const remainingA = idsA.filter(id=>!s.attachedA.has(id)).length;
+      const remainingB = idsB.filter(id=>!s.attachedB.has(id)).length;
+      if(s.finished) eliminatedCount += remainingA + remainingB;
+      else openCount += remainingA + remainingB;
+    });
+  }
+
+  return {
+    sessionId: session.id, nameA, nameB,
+    merged, adoptedA, adoptedB, brandNew,
+    open: openCount, eliminated: eliminatedCount,
+    finishedLevels: comps.length
+  };
+}
 function findProfileLabel(profileId){
   if(!profileId) return '—';
   const u = state.adminUsers.find(x=>x.id===profileId) || state.adminPending.find(x=>x.id===profileId);
@@ -952,7 +1104,11 @@ async function logAudit(targetId, action, oldValue, newValue){
     new_value: newValue==null ? null : String(newValue)
   });
 }
-function setAdminTab(tab){ state.adminTab = tab; render(); }
+function setAdminTab(tab){
+  state.adminTab = tab;
+  render();
+  if(tab==='stats' && !state.adminCaptureStats && !state.adminStatsLoading) loadAdminStatistics();
+}
 async function approveUser(id){
   const role = document.getElementById('role-'+id).value;
   const before = state.adminPending.find(u=>u.id===id);
@@ -1116,6 +1272,19 @@ function compareItemLabel(side, itemId){
   const items = side==='a' ? state.compareItemsA : state.compareItemsB;
   const item = items.find(i=>i.id===itemId);
   return item ? item.label : '';
+}
+// Shared status derivation for a target_item, from its two source slots —
+// used both for the build tool's status pills and the Statistics tab's
+// per-session breakdown, so the two never drift apart. nameA/nameB should
+// be the raw (unescaped) company names; escape the returned statusLabel at
+// the point of HTML insertion, not here.
+function deriveTargetItemStatus(t, nameA, nameB){
+  const both = !!(t.source_item_a_id && t.source_item_b_id);
+  const onlyA = !!(t.source_item_a_id && !t.source_item_b_id);
+  const onlyB = !!(!t.source_item_a_id && t.source_item_b_id);
+  const statusClass = both ? 'match' : (onlyA||onlyB) ? 'partial' : 'new';
+  const statusLabel = both ? 'Merged' : onlyA ? `Adopted from ${nameA}` : onlyB ? `Adopted from ${nameB}` : 'New';
+  return { statusClass, statusLabel };
 }
 function compareItemsForCompanyL1(companyId){
   const c = state.companies.find(x=>x.id===companyId);
@@ -1821,14 +1990,10 @@ function renderCompareSourceColumn(side, isAdmin){
 function renderCompareTargetColumn(isAdmin){
   const level = compareCurrentLevel();
   const nextLevel = COMPARE_LEVELS[COMPARE_LEVELS.indexOf(level)+1];
-  const nameA = escapeHtml(compareCompanyName(state.compareSession.company_a_id));
-  const nameB = escapeHtml(compareCompanyName(state.compareSession.company_b_id));
+  const nameA = compareCompanyName(state.compareSession.company_a_id);
+  const nameB = compareCompanyName(state.compareSession.company_b_id);
   const cardsHtml = state.compareTargetItems.map(t=>{
-    const both = !!(t.source_item_a_id && t.source_item_b_id);
-    const onlyA = !!(t.source_item_a_id && !t.source_item_b_id);
-    const onlyB = !!(!t.source_item_a_id && t.source_item_b_id);
-    const statusClass = both ? 'match' : (onlyA||onlyB) ? 'partial' : 'new';
-    const statusLabel = both ? 'Merged' : onlyA ? `Adopted from ${nameA}` : onlyB ? `Adopted from ${nameB}` : 'New';
+    const { statusClass, statusLabel } = deriveTargetItemStatus(t, nameA, nameB);
     const drillable = !!nextLevel && isTargetItemDrillable(t);
     return `<div class="compare-target-card" data-drag-id="${t.id}"
       ${isAdmin ? `draggable="true" onmousedown="onDraggableMouseDown(event, this)" ondragstart="onRowDragStart(event,'target',null,'${t.id}')" ondragend="onRowDragEnd()"` : ''}>
@@ -1836,7 +2001,7 @@ function renderCompareTargetColumn(isAdmin){
         ? `<input type="text" class="compare-target-name no-drag" value="${escapeHtml(t.name||'')}" placeholder="Name…" oninput="onTargetItemNameInput('${t.id}', this.value)">`
         : `<div class="compare-target-name-static">${escapeHtml(t.name || '(untitled)')}</div>`}
       <div class="compare-target-footer">
-        <span class="compare-status-badge ${statusClass}">${statusLabel}</span>
+        <span class="compare-status-badge ${statusClass}">${escapeHtml(statusLabel)}</span>
         ${drillable ? `<button class="btn btn-ghost no-drag" onclick="drillIntoTargetItem('${t.id}')">Open ${nextLevel.toUpperCase()} ›</button>` : ''}
         ${isAdmin ? `<button class="icon-btn no-drag" onclick="removeTargetItem('${t.id}')">✕</button>` : ''}
       </div>
@@ -2171,6 +2336,7 @@ function renderAdmin(){
         <div class="tab ${state.adminTab==='groups'?'active':''}" onclick="setAdminTab('groups')">Groups</div>
         <div class="tab ${state.adminTab==='audit'?'active':''}" onclick="setAdminTab('audit')">Audit Log</div>
         <div class="tab ${state.adminTab==='depts'?'active':''}" onclick="setAdminTab('depts')">Departments</div>
+        <div class="tab ${state.adminTab==='stats'?'active':''}" onclick="setAdminTab('stats')">Statistics</div>
       </div>
       ${state.adminTab==='pending' ? renderAdminPending() : ''}
       ${state.adminTab==='users' ? renderAdminUsers() : ''}
@@ -2178,6 +2344,7 @@ function renderAdmin(){
       ${state.adminTab==='groups' ? renderAdminGroups() : ''}
       ${state.adminTab==='audit' ? renderAdminAuditLog() : ''}
       ${state.adminTab==='depts' ? renderAdminDepts() : ''}
+      ${state.adminTab==='stats' ? renderAdminStatistics() : ''}
     </div>
   </div>
   ${state.groupMembersModalFor ? renderGroupMembersModal() : ''}`;
@@ -2398,6 +2565,52 @@ function renderAdminDepts(){
     <table class="admin-table"><thead><tr><th>Department</th></tr></thead><tbody>
       ${state.departments.map(d=>`<tr><td>${escapeHtml(d.name)}</td></tr>`).join('')}
     </tbody></table>`;
+}
+
+/* ---------- Statistics tab ---------- */
+function renderAdminStatistics(){
+  if(state.adminStatsLoading && !state.adminCaptureStats){
+    return `<div class="status-box"><div class="spinner"></div>Loading statistics…</div>`;
+  }
+  if(!state.adminCaptureStats){
+    return `<div class="empty-note">No statistics yet.</div>`;
+  }
+  const cs = state.adminCaptureStats;
+  const ms = state.adminMappingStats || [];
+  return `
+    <div class="subblock-title" style="margin-bottom:10px;">Process Capture progress</div>
+    <div class="stats">
+      <div class="stat"><div class="l">L1</div><div class="n">${cs.totals.l1}</div></div>
+      <div class="stat"><div class="l">L2</div><div class="n">${cs.totals.l2}</div></div>
+      <div class="stat"><div class="l">L3</div><div class="n">${cs.totals.l3}</div></div>
+      <div class="stat"><div class="l">L4</div><div class="n">${cs.totals.l4}</div></div>
+      <div class="stat"><div class="l">L5</div><div class="n">${cs.totals.l5}</div></div>
+    </div>
+    ${cs.byCompany.length===0 ? `<div class="empty-note">No companies yet.</div>` : `
+    <table class="admin-table"><thead><tr>
+      <th>Company</th><th>L1</th><th>L2</th><th>L3</th><th>L4</th><th>L5</th>
+    </tr></thead><tbody>
+      ${cs.byCompany.map(c=>`<tr>
+        <td>${escapeHtml(c.name)}</td><td>${c.l1}</td><td>${c.l2}</td><td>${c.l3}</td><td>${c.l4}</td><td>${c.l5}</td>
+      </tr>`).join('')}
+    </tbody></table>`}
+    <div class="subblock-title" style="margin:24px 0 10px;">Process Mapping progress</div>
+    ${ms.length===0 ? `<div class="empty-note">No comparisons yet.</div>` : `
+    <table class="admin-table"><thead><tr>
+      <th>Comparison</th><th>Merged</th><th>Adopted (A)</th><th>Adopted (B)</th><th>New</th><th>Open</th><th>Eliminated</th><th>Finished levels</th>
+    </tr></thead><tbody>
+      ${ms.map(s=>`<tr>
+        <td>${escapeHtml(s.nameA)} ↔ ${escapeHtml(s.nameB)}</td>
+        <td>${s.merged}</td>
+        <td>${s.adoptedA}</td>
+        <td>${s.adoptedB}</td>
+        <td>${s.brandNew}</td>
+        <td>${s.open}</td>
+        <td>${s.eliminated}</td>
+        <td>${s.finishedLevels}</td>
+      </tr>`).join('')}
+    </tbody></table>`}
+  `;
 }
 
 /* ---------- Groups tab ---------- */
