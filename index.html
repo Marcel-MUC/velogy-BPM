@@ -1352,7 +1352,7 @@ function findFinishBlocker(){
    the drag (never through the app's render()), since a full re-render mid-drag
    would tear down the very elements the browser is dragging. state.compare* is
    only updated (and render() called) once a drop actually completes. */
-let dragState = { payload:null, rowEl:null, placeholder:null };
+let dragState = { payload:null, rowEl:null, placeholder:null, hoveredCard:null };
 let autoScrollRAF = null, autoScrollEl = null, autoScrollSpeed = 0;
 
 function onRowDragStart(event, kind, side, itemId){
@@ -1377,7 +1377,19 @@ function onRowDragEnd(){
   document.querySelectorAll('.compare-dropzone.drop-active, .compare-dropzone.drop-invalid, .compare-target-card.drop-active')
     .forEach(el=>el.classList.remove('drop-active','drop-invalid'));
   stopAutoScroll();
-  dragState = { payload:null, rowEl:null, placeholder:null };
+  dragState = { payload:null, rowEl:null, placeholder:null, hoveredCard:null };
+}
+function setHoveredCard(card){
+  if(dragState.hoveredCard === card) return;
+  clearHoveredCard();
+  card.classList.add('drop-active');
+  dragState.hoveredCard = card;
+}
+function clearHoveredCard(){
+  if(dragState.hoveredCard){ dragState.hoveredCard.classList.remove('drop-active'); dragState.hoveredCard = null; }
+}
+function removeDragPlaceholder(){
+  if(dragState.placeholder && dragState.placeholder.parentNode) dragState.placeholder.parentNode.removeChild(dragState.placeholder);
 }
 function isDropCompatible(zoneType, payload){
   if(!payload) return false;
@@ -1449,31 +1461,62 @@ function stopAutoScroll(){
   if(autoScrollRAF){ cancelAnimationFrame(autoScrollRAF); autoScrollRAF = null; }
   autoScrollEl = null; autoScrollSpeed = 0;
 }
+// Card-vs-background detection lives here (not on each card's own
+// dragover/drop) because the cards are themselves draggable elements now
+// (for reordering) — a separate, per-card listener set turned out not to
+// reliably intercept a DIFFERENT drag (a source item) hovering over them.
+// Resolving "is the pointer over an existing card" via event.target.closest()
+// inside the single zone-level handler is robust regardless of what else on
+// the card is or isn't draggable.
+function hoveredTargetCard(event, zoneEl){
+  const card = event.target.closest('.compare-target-card');
+  return (card && card.parentNode === zoneEl) ? card : null;
+}
 function onZoneDragOver(event, zoneEl, zoneType){
   if(!dragState.payload) return;
   const compatible = isDropCompatible(zoneType, dragState.payload);
   zoneEl.classList.toggle('drop-invalid', !compatible);
   zoneEl.classList.toggle('drop-active', compatible);
-  if(!compatible){ event.dataTransfer.dropEffect = 'none'; stopAutoScroll(); return; }
+  if(!compatible){ event.dataTransfer.dropEffect = 'none'; stopAutoScroll(); clearHoveredCard(); return; }
   event.preventDefault();
   event.dataTransfer.dropEffect = 'move';
+
+  if(zoneType==='target' && dragState.payload.kind==='source'){
+    const card = hoveredTargetCard(event, zoneEl);
+    if(card){
+      setHoveredCard(card);
+      removeDragPlaceholder();
+      return;
+    }
+  }
+  clearHoveredCard();
   updateAutoScroll(zoneEl, event.clientY);
   movePlaceholder(zoneEl, getDragAfterElement(zoneEl, event.clientY));
 }
 function onZoneDragLeave(event, zoneEl){
   if(zoneEl.contains(event.relatedTarget)) return;
   zoneEl.classList.remove('drop-active','drop-invalid');
+  clearHoveredCard();
   if(autoScrollEl===zoneEl) stopAutoScroll();
 }
 function onZoneDrop(event, zoneEl, zoneType){
   event.preventDefault();
   const payload = dragState.payload;
   const compatible = payload && isDropCompatible(zoneType, payload);
-  const insertIndex = compatible ? placeholderIndex(zoneEl) : null;
   zoneEl.classList.remove('drop-active','drop-invalid');
-  if(dragState.placeholder && dragState.placeholder.parentNode) dragState.placeholder.parentNode.removeChild(dragState.placeholder);
   stopAutoScroll();
-  if(!compatible) return;
+  if(!compatible){ clearHoveredCard(); removeDragPlaceholder(); return; }
+
+  if(zoneType==='target' && payload.kind==='source' && dragState.hoveredCard){
+    const targetItemId = dragState.hoveredCard.dataset.dragId;
+    clearHoveredCard();
+    removeDragPlaceholder();
+    attachSourceToTarget(payload.side, payload.itemId, targetItemId);
+    return;
+  }
+  clearHoveredCard();
+  const insertIndex = placeholderIndex(zoneEl);
+  removeDragPlaceholder();
   if(zoneType==='source-a' || zoneType==='source-b'){
     if(payload.kind==='source') reorderSourceColumn(payload.side, payload.itemId, insertIndex);
   } else if(zoneType==='target'){
@@ -1489,26 +1532,6 @@ function onDraggableMouseDown(event, el){
   // for this press rather than trying to intercept the drag itself once
   // it's underway.
   el.draggable = !event.target.closest('.no-drag');
-}
-function onCardDragOver(event, targetItemId){
-  const payload = dragState.payload;
-  if(!payload || payload.kind !== 'source') return;
-  event.preventDefault();
-  event.stopPropagation();
-  event.currentTarget.classList.add('drop-active');
-}
-function onCardDragLeave(event){
-  event.currentTarget.classList.remove('drop-active');
-}
-async function onCardDrop(event, targetItemId){
-  const payload = dragState.payload;
-  if(!payload || payload.kind !== 'source') return;
-  event.preventDefault();
-  event.stopPropagation();
-  event.currentTarget.classList.remove('drop-active');
-  if(dragState.placeholder && dragState.placeholder.parentNode) dragState.placeholder.parentNode.removeChild(dragState.placeholder);
-  stopAutoScroll();
-  await attachSourceToTarget(payload.side, payload.itemId, targetItemId);
 }
 function reorderSourceColumn(side, itemId, insertIndex){
   const list = side==='a' ? state.compareItemsA : state.compareItemsB;
@@ -1806,7 +1829,7 @@ function renderCompareTargetColumn(isAdmin){
     const statusLabel = both ? 'Merged' : onlyA ? 'Adopted from A' : onlyB ? 'Adopted from B' : 'New';
     const drillable = !!nextLevel && isTargetItemDrillable(t);
     return `<div class="compare-target-card" data-drag-id="${t.id}"
-      ${isAdmin ? `draggable="true" onmousedown="onDraggableMouseDown(event, this)" ondragstart="onRowDragStart(event,'target',null,'${t.id}')" ondragend="onRowDragEnd()" ondragover="onCardDragOver(event,'${t.id}')" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,'${t.id}')"` : ''}>
+      ${isAdmin ? `draggable="true" onmousedown="onDraggableMouseDown(event, this)" ondragstart="onRowDragStart(event,'target',null,'${t.id}')" ondragend="onRowDragEnd()"` : ''}>
       ${isAdmin
         ? `<input type="text" class="compare-target-name no-drag" value="${escapeHtml(t.name||'')}" placeholder="Name…" oninput="onTargetItemNameInput('${t.id}', this.value)">`
         : `<div class="compare-target-name-static">${escapeHtml(t.name || '(untitled)')}</div>`}
