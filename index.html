@@ -2597,13 +2597,13 @@ function renderAdminStatistics(){
     <div class="subblock-title" style="margin:24px 0 10px;">Process Mapping progress</div>
     ${ms.length===0 ? `<div class="empty-note">No comparisons yet.</div>` : `
     <table class="admin-table"><thead><tr>
-      <th>Comparison</th><th>Merged</th><th>Adopted (A)</th><th>Adopted (B)</th><th>New</th><th>Open</th><th>Eliminated</th><th>Finished levels</th>
+      <th>Comparison</th><th>Merged</th><th>Adopted</th><th>Adopted</th><th>New</th><th>Open</th><th>Eliminated</th><th>Finished levels</th>
     </tr></thead><tbody>
       ${ms.map(s=>`<tr>
         <td>${escapeHtml(s.nameA)} ↔ ${escapeHtml(s.nameB)}</td>
         <td>${s.merged}</td>
-        <td>${s.adoptedA}</td>
-        <td>${s.adoptedB}</td>
+        <td>${s.adoptedA} <span style="color:var(--gray-500); font-size:11.5px;">(${escapeHtml(s.nameA)})</span></td>
+        <td>${s.adoptedB} <span style="color:var(--gray-500); font-size:11.5px;">(${escapeHtml(s.nameB)})</span></td>
         <td>${s.brandNew}</td>
         <td>${s.open}</td>
         <td>${s.eliminated}</td>
