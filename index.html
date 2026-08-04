@@ -252,7 +252,10 @@
   .compare-build-columns{ display:grid; grid-template-columns:1fr 1fr 1.2fr; gap:16px; }
   .compare-target-dropzone{ min-height:60px; border:1.5px dashed var(--gray-400); border-radius:12px; padding:10px; }
   .compare-target-card{ background:#fff; border:1px solid var(--gray-200); border-radius:10px;
-    padding:10px 12px; margin-bottom:8px; transition:background-color .12s ease, border-color .12s ease; }
+    padding:10px 12px; margin-bottom:8px; transition:background-color .12s ease, border-color .12s ease;
+    cursor:grab; }
+  .compare-target-card:active{ cursor:grabbing; }
+  .compare-target-card .no-drag{ cursor:auto; }
   .compare-target-card:last-of-type{ margin-bottom:10px; }
   .compare-target-card.drop-active{ background:var(--violet-light); border-color:var(--violet); }
   .compare-target-name{ font-weight:700; font-size:13.5px; border:none; padding:2px 0; width:100%; }
@@ -1481,6 +1484,14 @@ function onZoneDrop(event, zoneEl, zoneType){
     else if(payload.kind==='target') reorderTargetItem(payload.targetItemId, insertIndex);
   }
 }
+function onCardMouseDown(event, cardEl){
+  // The whole card is draggable, but a press starting on a .no-drag child
+  // (name input, Open/remove buttons) should behave as a normal click/focus,
+  // not a drag — native drag-eligibility is decided from the `draggable`
+  // attribute at press time, so toggle it off just for this press rather
+  // than trying to intercept the drag itself once it's underway.
+  cardEl.draggable = !event.target.closest('.no-drag');
+}
 function onCardDragOver(event, targetItemId){
   const payload = dragState.payload;
   if(!payload || payload.kind !== 'source') return;
@@ -1797,17 +1808,14 @@ function renderCompareTargetColumn(isAdmin){
     const statusLabel = both ? 'Merged' : onlyA ? 'Adopted from A' : onlyB ? 'Adopted from B' : 'New';
     const drillable = !!nextLevel && isTargetItemDrillable(t);
     return `<div class="compare-target-card" data-drag-id="${t.id}"
-      ${isAdmin ? `ondragover="onCardDragOver(event,'${t.id}')" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,'${t.id}')"` : ''}>
-      <div style="display:flex; align-items:center; gap:6px;">
-        ${isAdmin ? `<span class="drag-handle" draggable="true" ondragstart="onRowDragStart(event,'target',null,'${t.id}')" ondragend="onRowDragEnd()">⠿</span>` : ''}
-        ${isAdmin
-          ? `<input type="text" class="compare-target-name" value="${escapeHtml(t.name||'')}" placeholder="Name…" oninput="onTargetItemNameInput('${t.id}', this.value)">`
-          : `<div class="compare-target-name-static">${escapeHtml(t.name || '(untitled)')}</div>`}
-      </div>
+      ${isAdmin ? `draggable="true" onmousedown="onCardMouseDown(event, this)" ondragstart="onRowDragStart(event,'target',null,'${t.id}')" ondragend="onRowDragEnd()" ondragover="onCardDragOver(event,'${t.id}')" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,'${t.id}')"` : ''}>
+      ${isAdmin
+        ? `<input type="text" class="compare-target-name no-drag" value="${escapeHtml(t.name||'')}" placeholder="Name…" oninput="onTargetItemNameInput('${t.id}', this.value)">`
+        : `<div class="compare-target-name-static">${escapeHtml(t.name || '(untitled)')}</div>`}
       <div class="compare-target-footer">
         <span class="compare-status-badge ${statusClass}">${statusLabel}</span>
-        ${drillable ? `<button class="btn btn-ghost" onclick="drillIntoTargetItem('${t.id}')">Open ${nextLevel.toUpperCase()} ›</button>` : ''}
-        ${isAdmin ? `<button class="icon-btn" onclick="removeTargetItem('${t.id}')">✕</button>` : ''}
+        ${drillable ? `<button class="btn btn-ghost no-drag" onclick="drillIntoTargetItem('${t.id}')">Open ${nextLevel.toUpperCase()} ›</button>` : ''}
+        ${isAdmin ? `<button class="icon-btn no-drag" onclick="removeTargetItem('${t.id}')">✕</button>` : ''}
       </div>
     </div>`;
   }).join('');
