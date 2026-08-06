@@ -135,6 +135,7 @@
   .tree-l4{ font-size:13px; color:var(--gray-500); margin:2px 0 2px 48px; }
   .tree-l5{ font-size:12.5px; color:var(--gray-400); margin:2px 0 2px 64px; }
   .tree-l2-divider{ height:1px; background:var(--gray-200); margin:8px 16px; }
+  .tree-highlight{ background:var(--gray-100); border-radius:6px; padding:2px 6px; margin-left:-6px; }
   .tree-empty{ text-align:center; color:var(--gray-400); font-size:13.5px; padding:40px 10px; line-height:1.7; }
 
   .dash-list{ display:flex; flex-direction:column; gap:10px; }
@@ -640,6 +641,7 @@ function toggleSpSelection(spId){
   state.editorSelectedStepId = null;
   state.editorSelectedTaskId = null;
   renderEditorLeftPanel();
+  updateEditorTree();
 }
 function findStep(spId, stepId){ return findSp(spId).steps.find(s=>s.id===stepId); }
 function findTask(spId, stepId, taskId){ return findStep(spId, stepId).tasks.find(t=>t.id===taskId); }
@@ -647,10 +649,12 @@ function toggleStepSelection(stepId){
   state.editorSelectedStepId = (state.editorSelectedStepId === stepId) ? null : stepId;
   state.editorSelectedTaskId = null;
   renderEditorLeftPanel();
+  updateEditorTree();
 }
 function toggleTaskSelection(taskId){
   state.editorSelectedTaskId = (state.editorSelectedTaskId === taskId) ? null : taskId;
   renderEditorLeftPanel();
+  updateEditorTree();
 }
 /* --- text edits (debounced db write, no full re-render) --- */
 function refreshSaveButton(btnId, enabled){
@@ -2978,18 +2982,29 @@ function updateEditorTree(){
     <div class="stat"><div class="l">L4</div><div class="n">${l4c}</div></div>
     <div class="stat"><div class="l">L5</div><div class="n">${l5c}</div></div>`;
 
+  // The deepest currently-selected item (mirrors renderEditorLeftPanel's own
+  // selSp/selStep/selTask resolution) gets the tree highlight — never its
+  // ancestors, even though their ids are also still "selected" on the way down.
+  const selSp = p.l2_locked ? (p.subprocesses.find(s=>s.id===state.editorSelectedSpId) || null) : null;
+  const selStep = (selSp && selSp.l3_locked) ? (selSp.steps.find(s=>s.id===state.editorSelectedStepId) || null) : null;
+  const selTask = (selStep && selStep.l4_locked) ? (selStep.tasks.find(t=>t.id===state.editorSelectedTaskId) || null) : null;
+  let highlightLevel = null, highlightId = null;
+  if(selTask){ highlightLevel = 'l4'; highlightId = selTask.id; }
+  else if(selStep){ highlightLevel = 'l3'; highlightId = selStep.id; }
+  else if(selSp){ highlightLevel = 'l2'; highlightId = selSp.id; }
+
   let h = '';
   if(p.l1_name){
     h += `<div class="tree-process"><div class="tree-l1">${escapeHtml(p.l1_name)}</div>`;
     const namedSubprocesses = p.subprocesses.filter(sp=>sp.name.trim());
     namedSubprocesses.forEach((sp, spIdx)=>{
-      h += `<div class="tree-l2">${escapeHtml(sp.name)}</div>`;
+      h += `<div class="tree-l2 ${highlightLevel==='l2' && highlightId===sp.id ? 'tree-highlight' : ''}">${escapeHtml(sp.name)}</div>`;
       sp.steps.forEach(st=>{
         if(!st.text.trim()) return;
-        h += `<div class="tree-l3">${escapeHtml(st.text)}</div>`;
+        h += `<div class="tree-l3 ${highlightLevel==='l3' && highlightId===st.id ? 'tree-highlight' : ''}">${escapeHtml(st.text)}</div>`;
         st.tasks.forEach(task=>{
           if(!task.text.trim()) return;
-          h += `<div class="tree-l4">${escapeHtml(task.text)}</div>`;
+          h += `<div class="tree-l4 ${highlightLevel==='l4' && highlightId===task.id ? 'tree-highlight' : ''}">${escapeHtml(task.text)}</div>`;
           task.work_instructions.forEach(wi=>{
             if(!wi.text.trim()) return;
             h += `<div class="tree-l5">${escapeHtml(wi.text)}</div>`;
