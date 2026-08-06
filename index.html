@@ -226,8 +226,7 @@
   .compare-item-row:active{ cursor:grabbing; }
   .compare-item-row .no-drag{ cursor:pointer; }
   .compare-item-row:last-child{ margin-bottom:0; }
-  .compare-item-row:hover{ background:var(--violet-light); border-color:var(--violet-light); }
-  .compare-item-row.sel{ background:var(--violet-light); border-color:var(--violet); }
+  .compare-item-row:hover{ background:var(--gray-50); }
   .compare-item-row.static{ cursor:default; }
   .compare-item-row.static:hover{ background:#fff; border-color:var(--gray-200); }
   .compare-pair-row{ display:flex; align-items:center; gap:10px; padding:10px 0;
@@ -1996,7 +1995,7 @@ function renderCompareL1Matched(l1Matches){
       <span class="compare-pair-label">${escapeHtml(m.a.label)}</span>
       <span class="compare-pair-arrow">↔</span>
       <span class="compare-pair-label">${escapeHtml(m.b.label)}</span>
-      <button class="btn btn-ghost" onclick="drillIntoCompareL1('${m.a.id}','${m.b.id}')">Open L2 ›</button>
+      <button class="link-btn" onclick="drillIntoCompareL1('${m.a.id}','${m.b.id}')">Open L2 ›</button>
     </div>`).join('');
 }
 function renderCompareL1OnlyColumn(side, l1Matches){
@@ -2043,7 +2042,7 @@ function renderCompareTargetColumn(isAdmin){
         : `<div class="compare-target-name-static">${escapeHtml(t.name || '(untitled)')}</div>`}
       <div class="compare-target-footer">
         <span class="compare-status-badge ${statusClass}">${escapeHtml(statusLabel)}</span>
-        ${drillable ? `<button class="btn btn-ghost no-drag" onclick="drillIntoTargetItem('${t.id}')">Open ${nextLevel.toUpperCase()} ›</button>` : ''}
+        ${drillable ? `<button class="link-btn no-drag" onclick="drillIntoTargetItem('${t.id}')">Open ${nextLevel.toUpperCase()} ›</button>` : ''}
         ${isAdmin ? `<button class="icon-btn no-drag" onclick="removeTargetItem('${t.id}')">✕</button>` : ''}
       </div>
     </div>`;
