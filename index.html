@@ -130,10 +130,10 @@
   .tree-process{ margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid var(--gray-200); }
   .tree-process:last-child{ border-bottom:none; }
   .tree-l1{ font-weight:700; color:var(--gray-900); font-size:16px; margin-bottom:6px; }
-  .tree-l2{ font-weight:700; font-size:14.5px; color:var(--gray-900); margin:6px 0 2px 16px; }
-  .tree-l3{ font-size:13.5px; color:var(--gray-700); margin:2px 0 2px 32px; }
-  .tree-l4{ font-size:13px; color:var(--gray-500); margin:2px 0 2px 48px; }
-  .tree-l5{ font-size:12.5px; color:var(--gray-400); margin:2px 0 2px 64px; }
+  .tree-l2{ font-weight:700; font-size:14.5px; color:var(--gray-900); margin:8px 0 2px 16px; }
+  .tree-l3{ font-weight:600; font-size:13.5px; color:var(--gray-800); margin:2px 0 2px 32px; }
+  .tree-l4{ font-weight:400; font-size:13px; color:var(--gray-700); margin:2px 0 2px 48px; }
+  .tree-l5{ font-weight:400; font-style:italic; font-size:12.5px; color:var(--gray-400); margin:2px 0 2px 64px; }
   .tree-l2-divider{ height:1px; background:var(--gray-200); margin:8px 16px; }
   .tree-highlight{ background:var(--gray-100); border-radius:6px; padding:2px 6px; margin-left:-6px; }
   .tree-empty{ text-align:center; color:var(--gray-400); font-size:13.5px; padding:40px 10px; line-height:1.7; }
@@ -2982,32 +2982,37 @@ function updateEditorTree(){
     <div class="stat"><div class="l">L4</div><div class="n">${l4c}</div></div>
     <div class="stat"><div class="l">L5</div><div class="n">${l5c}</div></div>`;
 
-  // The deepest currently-selected item (mirrors renderEditorLeftPanel's own
-  // selSp/selStep/selTask resolution) gets the tree highlight — never its
-  // ancestors, even though their ids are also still "selected" on the way down.
+  // The active editing scope is the deepest currently-selected item (mirrors
+  // renderEditorLeftPanel's own selSp/selStep/selTask resolution). Everything
+  // nested under it is also part of what's "currently being worked on", so
+  // the highlight cascades down through its whole subtree — but never
+  // upward to its parents/siblings, since those aren't part of this scope.
   const selSp = p.l2_locked ? (p.subprocesses.find(s=>s.id===state.editorSelectedSpId) || null) : null;
   const selStep = (selSp && selSp.l3_locked) ? (selSp.steps.find(s=>s.id===state.editorSelectedStepId) || null) : null;
   const selTask = (selStep && selStep.l4_locked) ? (selStep.tasks.find(t=>t.id===state.editorSelectedTaskId) || null) : null;
-  let highlightLevel = null, highlightId = null;
-  if(selTask){ highlightLevel = 'l4'; highlightId = selTask.id; }
-  else if(selStep){ highlightLevel = 'l3'; highlightId = selStep.id; }
-  else if(selSp){ highlightLevel = 'l2'; highlightId = selSp.id; }
+  let highlightSpId = null, highlightStepId = null, highlightTaskId = null;
+  if(selTask){ highlightTaskId = selTask.id; }
+  else if(selStep){ highlightStepId = selStep.id; }
+  else if(selSp){ highlightSpId = selSp.id; }
 
   let h = '';
   if(p.l1_name){
     h += `<div class="tree-process"><div class="tree-l1">${escapeHtml(p.l1_name)}</div>`;
     const namedSubprocesses = p.subprocesses.filter(sp=>sp.name.trim());
     namedSubprocesses.forEach((sp, spIdx)=>{
-      h += `<div class="tree-l2 ${highlightLevel==='l2' && highlightId===sp.id ? 'tree-highlight' : ''}">${escapeHtml(sp.name)}</div>`;
+      const spOn = highlightSpId === sp.id;
+      h += `<div class="tree-l2 ${spOn ? 'tree-highlight' : ''}">${escapeHtml(sp.name)}</div>`;
       sp.steps.forEach(st=>{
         if(!st.text.trim()) return;
-        h += `<div class="tree-l3 ${highlightLevel==='l3' && highlightId===st.id ? 'tree-highlight' : ''}">${escapeHtml(st.text)}</div>`;
+        const stepOn = spOn || highlightStepId === st.id;
+        h += `<div class="tree-l3 ${stepOn ? 'tree-highlight' : ''}">${escapeHtml(st.text)}</div>`;
         st.tasks.forEach(task=>{
           if(!task.text.trim()) return;
-          h += `<div class="tree-l4 ${highlightLevel==='l4' && highlightId===task.id ? 'tree-highlight' : ''}">${escapeHtml(task.text)}</div>`;
+          const taskOn = stepOn || highlightTaskId === task.id;
+          h += `<div class="tree-l4 ${taskOn ? 'tree-highlight' : ''}">${escapeHtml(task.text)}</div>`;
           task.work_instructions.forEach(wi=>{
             if(!wi.text.trim()) return;
-            h += `<div class="tree-l5">${escapeHtml(wi.text)}</div>`;
+            h += `<div class="tree-l5 ${taskOn ? 'tree-highlight' : ''}">${escapeHtml(wi.text)}</div>`;
           });
         });
       });
