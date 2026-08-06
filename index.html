@@ -135,7 +135,11 @@
   .tree-l4{ font-weight:400; font-size:13px; color:var(--gray-700); margin:2px 0 2px 48px; }
   .tree-l5{ font-weight:400; font-style:italic; font-size:12.5px; color:var(--gray-400); margin:2px 0 2px 64px; }
   .tree-l2-divider{ height:1px; background:var(--gray-200); margin:8px 16px; }
-  .tree-highlight{ background:var(--gray-100); border-radius:6px; padding:2px 6px; margin-left:-6px; }
+  .tree-highlight-group{ display:inline-block; background:var(--gray-100); border-radius:8px; padding:4px 12px; margin:4px 0; }
+  .tree-highlight-group .tree-l2{ margin-left:0; }
+  .tree-highlight-group .tree-l3{ margin-left:16px; }
+  .tree-highlight-group .tree-l4{ margin-left:32px; }
+  .tree-highlight-group .tree-l5{ margin-left:48px; }
   .tree-empty{ text-align:center; color:var(--gray-400); font-size:13.5px; padding:40px 10px; line-height:1.7; }
 
   .dash-list{ display:flex; flex-direction:column; gap:10px; }
@@ -2995,31 +2999,50 @@ function updateEditorTree(){
   else if(selStep){ highlightStepId = selStep.id; }
   else if(selSp){ highlightSpId = selSp.id; }
 
+  // Highlighted lines are wrapped in one shrink-to-fit box per contiguous
+  // run (there's only ever one run, since exactly one scope can be active),
+  // instead of boxing each line separately — the box sits at the run's own
+  // indent level and stays open across levels while `isOn` keeps holding.
   let h = '';
+  let groupOpen = false;
+  const LEVEL_MARGIN = {2:16, 3:32, 4:48, 5:64};
+  function closeGroup(){ if(groupOpen){ h += `</div>`; groupOpen = false; } }
+  function emitLine(level, isOn, text){
+    if(isOn && !groupOpen){
+      h += `<div class="tree-highlight-group" style="margin-left:${LEVEL_MARGIN[level]}px;">`;
+      groupOpen = true;
+    } else if(!isOn){
+      closeGroup();
+    }
+    h += `<div class="tree-l${level}">${escapeHtml(text)}</div>`;
+  }
+
   if(p.l1_name){
     h += `<div class="tree-process"><div class="tree-l1">${escapeHtml(p.l1_name)}</div>`;
     const namedSubprocesses = p.subprocesses.filter(sp=>sp.name.trim());
     namedSubprocesses.forEach((sp, spIdx)=>{
       const spOn = highlightSpId === sp.id;
-      h += `<div class="tree-l2 ${spOn ? 'tree-highlight' : ''}">${escapeHtml(sp.name)}</div>`;
+      emitLine(2, spOn, sp.name);
       sp.steps.forEach(st=>{
         if(!st.text.trim()) return;
         const stepOn = spOn || highlightStepId === st.id;
-        h += `<div class="tree-l3 ${stepOn ? 'tree-highlight' : ''}">${escapeHtml(st.text)}</div>`;
+        emitLine(3, stepOn, st.text);
         st.tasks.forEach(task=>{
           if(!task.text.trim()) return;
           const taskOn = stepOn || highlightTaskId === task.id;
-          h += `<div class="tree-l4 ${taskOn ? 'tree-highlight' : ''}">${escapeHtml(task.text)}</div>`;
+          emitLine(4, taskOn, task.text);
           task.work_instructions.forEach(wi=>{
             if(!wi.text.trim()) return;
-            h += `<div class="tree-l5 ${taskOn ? 'tree-highlight' : ''}">${escapeHtml(wi.text)}</div>`;
+            emitLine(5, taskOn, wi.text);
           });
         });
       });
+      closeGroup();
       if(spIdx < namedSubprocesses.length-1) h += `<div class="tree-l2-divider"></div>`;
     });
     h += `</div>`;
   }
+  closeGroup();
   const treeEl = document.getElementById('treeBody');
   if(treeEl) treeEl.innerHTML = h.trim() ? h : `<div class="tree-empty">Nothing captured yet.</div>`;
 }
