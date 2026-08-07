@@ -2845,8 +2845,8 @@ function rowStatusHtml(isSel){
   const isViewer = !state.editorCanEdit;
   const pillClass = isSel ? 'active' : 'todo';
   const label = isSel
-    ? (isViewer ? 'Currently viewing' : 'Currently editing')
-    : (isViewer ? 'Click to view' : 'Click to edit');
+    ? (isViewer ? 'Currently viewing' : 'Currently selected')
+    : (isViewer ? 'Click to view' : 'Select');
   return `<div style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
     <span class="row-pill ${pillClass}">${label}</span>
     <span class="row-chevron">›</span>
