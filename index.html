@@ -1310,6 +1310,11 @@ const COMPARE_LEVEL_CONFIG = {
   l4: { table:'tasks', labelCol:'text', parentCol:'step_id' },
   l5: { table:'work_instructions', labelCol:'text', parentCol:'task_id' }
 };
+// What's missing, named by the parent level, when a source column's company
+// has no item to descend from here (a one-sided mega-cycle, or a target item
+// built with only one source) — e.g. viewing L2 with no parent process means
+// that company has no such mega-cycle.
+const COMPARE_MISSING_PARENT_LABEL = { l2:'mega-cycle', l3:'sub-process', l4:'process step', l5:'task' };
 function compareCurrentLevel(){ return COMPARE_LEVELS[state.comparePath.length]; }
 function compareNormalize(s){ return (s||'').trim().toLowerCase(); }
 function compareCompanyName(companyId){
@@ -1426,12 +1431,13 @@ function currentBuildScope(){
   const level = compareCurrentLevel();
   if(level === 'l1') return null;
   if(state.comparePath.length === 1){
-    // Top of a build tree: parent is the matched L1 pair (never a target_item).
+    // Top of a build tree: parent is an L1 mega-cycle (a matched pair, or a
+    // one-sided one — either itemA or itemB may be null, never a target_item).
     const root = state.comparePath[0];
     return {
       level, parentTargetItemId:null,
-      l1ProcessAId: root.itemA.id, l1ProcessBId: root.itemB.id,
-      parentAId: root.itemA.id, parentBId: root.itemB.id
+      l1ProcessAId: root.itemA ? root.itemA.id : null, l1ProcessBId: root.itemB ? root.itemB.id : null,
+      parentAId: root.itemA ? root.itemA.id : null, parentBId: root.itemB ? root.itemB.id : null
     };
   }
   const parentEntry = state.comparePath[state.comparePath.length - 1];
@@ -1455,20 +1461,25 @@ function buildTargetItemPayload(scope, name, sourceAId, sourceBId, position){
     source_item_b_id: sourceBId || null
   };
 }
+// A root scope's l1ProcessAId/l1ProcessBId can each independently be a real
+// id or null (a one-sided mega-cycle) — null needs `.is()`, not `.eq()`,
+// since Postgres/PostgREST don't treat `col = null` as `col is null`.
+function applyRootScopeFilter(q, scope){
+  q = q.is('parent_target_item_id', null);
+  q = scope.l1ProcessAId ? q.eq('l1_process_a_id', scope.l1ProcessAId) : q.is('l1_process_a_id', null);
+  q = scope.l1ProcessBId ? q.eq('l1_process_b_id', scope.l1ProcessBId) : q.is('l1_process_b_id', null);
+  return q;
+}
 async function fetchTargetItemsForScope(scope){
   let q = sb.from('target_items').select('*').eq('session_id', state.compareSession.id).eq('level', scope.level);
-  q = scope.parentTargetItemId
-    ? q.eq('parent_target_item_id', scope.parentTargetItemId)
-    : q.is('parent_target_item_id', null).eq('l1_process_a_id', scope.l1ProcessAId).eq('l1_process_b_id', scope.l1ProcessBId);
+  q = scope.parentTargetItemId ? q.eq('parent_target_item_id', scope.parentTargetItemId) : applyRootScopeFilter(q, scope);
   const { data, error } = await q.order('position');
   if(error){ showError(error.message); return []; }
   return data || [];
 }
 async function fetchBuildCompletion(scope){
   let q = sb.from('build_completions').select('*').eq('session_id', state.compareSession.id).eq('level', scope.level);
-  q = scope.parentTargetItemId
-    ? q.eq('parent_target_item_id', scope.parentTargetItemId)
-    : q.is('parent_target_item_id', null).eq('l1_process_a_id', scope.l1ProcessAId).eq('l1_process_b_id', scope.l1ProcessBId);
+  q = scope.parentTargetItemId ? q.eq('parent_target_item_id', scope.parentTargetItemId) : applyRootScopeFilter(q, scope);
   const { data, error } = await q.maybeSingle();
   if(error){ showError(error.message); return null; }
   return data;
@@ -1911,8 +1922,8 @@ function resetDrillUiState(){
 function drillIntoCompareL1(processAId, processBId){
   state.comparePath.push({
     level: 'l1',
-    itemA: { id: processAId, label: compareItemLabel('a', processAId) },
-    itemB: { id: processBId, label: compareItemLabel('b', processBId) }
+    itemA: processAId ? { id: processAId, label: compareItemLabel('a', processAId) } : null,
+    itemB: processBId ? { id: processBId, label: compareItemLabel('b', processBId) } : null
   });
   resetDrillUiState();
   render();
@@ -1993,7 +2004,7 @@ function renderCompareBreadcrumb(){
   const crumbs = [`<span class="compare-crumb ${state.comparePath.length===0?'current':''}" onclick="compareBreadcrumbTo(-1)">${escapeHtml(rootLabel)}</span>`];
   state.comparePath.forEach((p, idx)=>{
     const isCurrent = idx === state.comparePath.length-1;
-    const label = p.level==='l1' ? (p.itemA.label || '—') : (p.targetItem.name || '(untitled)');
+    const label = p.level==='l1' ? ((p.itemA || p.itemB).label || '—') : (p.targetItem.name || '(untitled)');
     crumbs.push(`<span class="compare-crumb-sep">›</span>`);
     crumbs.push(`<span class="compare-crumb ${isCurrent?'current':''}" onclick="compareBreadcrumbTo(${idx})">${escapeHtml(label)}</span>`);
   });
@@ -2014,9 +2025,20 @@ function renderCompareL1OnlyColumn(side, l1Matches){
   const used = side==='a' ? l1Matches.usedA : l1Matches.usedB;
   const onlyItems = items.filter(i=>!used.has(i.id));
   if(onlyItems.length===0) return `<div class="empty-note">Nothing unique here.</div>`;
-  return onlyItems.map(i=>`<div class="compare-item-row static"><span>${escapeHtml(i.label || '(untitled)')}</span></div>`).join('');
+  return onlyItems.map(i=>`
+    <div class="compare-item-row static">
+      <span>${escapeHtml(i.label || '(untitled)')}</span>
+      <button class="link-btn" onclick="drillIntoCompareL1(${side==='a' ? `'${i.id}'` : 'null'}, ${side==='b' ? `'${i.id}'` : 'null'})">Open L2 ›</button>
+    </div>`).join('');
 }
 function renderCompareSourceColumn(side, editable){
+  const scope = currentBuildScope();
+  const parentId = side==='a' ? scope.parentAId : scope.parentBId;
+  if(!parentId){
+    const companyName = compareCompanyName(side==='a' ? state.compareSession.company_a_id : state.compareSession.company_b_id);
+    const label = COMPARE_MISSING_PARENT_LABEL[scope.level] || 'item';
+    return `<div class="compare-source-dropzone"><div class="empty-note">${escapeHtml(companyName)} doesn't have this ${label}.</div></div>`;
+  }
   const items = side==='a' ? state.compareItemsA : state.compareItemsB;
   const field = side==='a' ? 'source_item_a_id' : 'source_item_b_id';
   const attached = new Set(state.compareTargetItems.map(t=>t[field]).filter(Boolean));
