@@ -2319,9 +2319,9 @@ function renderCompanyMegaCycles(c){
   if(c.processes.length===0) return `<div class="empty-note" style="padding:10px 0 0;">No mega-cycles yet for this company.${state.profile.role==='admin' ? ' Add some via the ⋯ menu.' : ''}</div>`;
   return `<div style="margin-top:12px;" onclick="event.stopPropagation()">
       ${c.processes.map(p=>{
-        return `<div class="sp-row" onclick="openEditor('${p.id}')">
+        return `<div class="sp-row static">
           <span>${escapeHtml(p.l1_name)}</span>
-          <span class="link-btn" style="pointer-events:none;">Open L2 ›</span>
+          <button class="link-btn" onclick="openEditor('${p.id}')">Open L2 ›</button>
         </div>`;
       }).join('')}
     </div>`;
