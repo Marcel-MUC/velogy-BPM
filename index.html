@@ -2896,7 +2896,7 @@ function renderEditorLeftPanel(){
   if(!readOnly){
     html += p.l2_locked
       ? renderSavedRow('unlockL2()')
-      : `<button id="l2-save-btn" class="lock-btn" ${!p.subprocesses.some(s=>s.name.trim()) ? 'disabled':''} onclick="lockL2()">Save L2 → go to L3</button>`;
+      : `<button id="l2-save-btn" class="lock-btn" ${!p.subprocesses.some(s=>s.name.trim()) ? 'disabled':''} onclick="lockL2()">Save</button>`;
   }
   html += `</div>`;
 
@@ -2924,7 +2924,7 @@ function renderEditorLeftPanel(){
       if(!readOnly){
         html += `<button class="link-btn" onclick="addStep('${selSp.id}')">+ add step</button>`;
         const hasAnyStep = selSp.steps.some(s=>s.text.trim());
-        html += `<button id="l3-save-btn" class="lock-btn" ${!hasAnyStep ? 'disabled':''} onclick="lockL3ForSp('${selSp.id}')">Save L3 → select a step</button>`;
+        html += `<button id="l3-save-btn" class="lock-btn" ${!hasAnyStep ? 'disabled':''} onclick="lockL3ForSp('${selSp.id}')">Save</button>`;
       }
     } else {
       html += `<div class="card-desc" style="opacity:.5;">Click a step to work on its tasks in L4.</div>`;
@@ -2963,7 +2963,7 @@ function renderEditorLeftPanel(){
       if(!readOnly){
         html += `<button class="link-btn" onclick="addTask('${selSp.id}','${selStep.id}')">+ add task</button>`;
         const hasAnyTask = selStep.tasks.some(t=>t.text.trim());
-        html += `<button id="l4-save-btn" class="lock-btn" ${!hasAnyTask ? 'disabled':''} onclick="lockL4ForStep('${selSp.id}','${selStep.id}')">Save L4 → select a task for L5</button>`;
+        html += `<button id="l4-save-btn" class="lock-btn" ${!hasAnyTask ? 'disabled':''} onclick="lockL4ForStep('${selSp.id}','${selStep.id}')">Save</button>`;
       }
     } else {
       html += `<div class="card-desc" style="opacity:.5;">Click a task to work on its work instructions in L5.</div>`;
@@ -3004,7 +3004,7 @@ function renderEditorLeftPanel(){
       if(!readOnly){
         html += `<button class="link-btn" onclick="addWI('${selSp.id}','${selStep.id}','${selTask.id}')">+ add work instruction</button>`;
         const hasAnyWI = selTask.work_instructions.some(wi=>wi.text.trim());
-        html += `<button id="l5-save-btn" class="lock-btn" ${!hasAnyWI ? 'disabled':''} onclick="lockL5ForTask('${selSp.id}','${selStep.id}','${selTask.id}')">Save L5</button>`;
+        html += `<button id="l5-save-btn" class="lock-btn" ${!hasAnyWI ? 'disabled':''} onclick="lockL5ForTask('${selSp.id}','${selStep.id}','${selTask.id}')">Save</button>`;
       }
     } else {
       selTask.work_instructions.forEach(wi=>{
