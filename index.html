@@ -1856,7 +1856,7 @@ async function detachSourceFromAllTargets(side, itemId, exceptTargetItemId){
   }
 }
 async function createBlankTargetItem(){
-  if(state.compareBuildCompletion){ toast('This level is finished — reopen it first.'); return; }
+  if(state.compareBuildCompletion){ toast('This layer is finished — reopen it first.'); return; }
   const input = document.getElementById('new-target-item-input');
   const name = input ? input.value.trim() : '';
   if(!name){ toast('Please enter a name.'); return; }
@@ -1877,7 +1877,7 @@ function onTargetItemNameInput(targetItemId, v){
   });
 }
 async function removeTargetItem(targetItemId){
-  if(state.compareBuildCompletion){ toast('This level is finished — reopen it first.'); return; }
+  if(state.compareBuildCompletion){ toast('This layer is finished — reopen it first.'); return; }
   if(!await showConfirm('Remove this target item? Any deeper items built under it will be removed too.')) return;
   const { error } = await sb.from('target_items').delete().eq('id', targetItemId);
   if(error){ showError(error.message); return; }
@@ -1887,7 +1887,7 @@ async function removeTargetItem(targetItemId){
 async function finishLevel(){
   if(state.compareBuildCompletion) return;
   const blocker = findFinishBlocker();
-  if(blocker){ toast('Finish the deeper level for "'+(blocker.name||'(untitled)')+'" first.'); return; }
+  if(blocker){ toast('Finish the deeper layer for "'+(blocker.name||'(untitled)')+'" first.'); return; }
   const scope = currentBuildScope();
   const payload = {
     session_id: state.compareSession.id, level: scope.level,
@@ -1903,7 +1903,7 @@ async function finishLevel(){
 }
 async function reopenLevel(){
   if(!state.compareBuildCompletion) return;
-  if(!await showConfirm('Reopen this level? Unlinked items will show as Open again instead of Eliminated.')) return;
+  if(!await showConfirm('Reopen this layer? Unlinked items will show as Open again instead of Eliminated.')) return;
   const { error } = await sb.from('build_completions').delete().eq('id', state.compareBuildCompletion.id);
   if(error){ showError(error.message); return; }
   state.compareBuildCompletion = null;
@@ -1972,7 +1972,7 @@ function renderCompareCreateModal(){
   return `<div class="modal-overlay" onclick="if(event.target===this) closeCompareCreateModal()">
     <div class="modal" style="width:460px;">
       <h3>New comparison</h3>
-      <p class="card-hint" style="margin:-6px 0 14px;">Map two companies' process trees against each other, level by level.</p>
+      <p class="card-hint" style="margin:-6px 0 14px;">Map two companies' process trees against each other, layer by layer.</p>
       <div class="field">
         <label>Company A</label>
         <select onchange="state.comparePickerCompanyA=this.value;">
@@ -2134,12 +2134,12 @@ function renderCompare(){
     <div class="card">
       <div class="card-title" style="margin-bottom:4px;">${levelTitles[level]} <span style="opacity:.5; font-weight:600;">(${level.toUpperCase()})</span></div>
       <div class="card-hint" style="margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-        <span>${finished ? 'This level is finished — reopen it to make changes.' : 'Drag items from either side onto the target column to build it.'}</span>
+        <span>${finished ? 'This layer is finished — reopen it to make changes.' : 'Drag items from either side onto the target column to build it.'}</span>
         ${isAdmin ? (finished
-          ? `<button class="btn btn-ghost" onclick="reopenLevel()">Reopen this level</button>`
+          ? `<button class="btn btn-ghost" onclick="reopenLevel()">Reopen this layer</button>`
           : finishBlocker
-            ? `<button class="btn btn-primary" disabled title="Finish ${nextLevelForFinish.toUpperCase()} for &quot;${escapeHtml(finishBlocker.name || '(untitled)')}&quot; first">Finish this level</button>`
-            : `<button class="btn btn-primary" onclick="finishLevel()">Finish this level</button>`) : ''}
+            ? `<button class="btn btn-primary" disabled title="Finish ${nextLevelForFinish.toUpperCase()} for &quot;${escapeHtml(finishBlocker.name || '(untitled)')}&quot; first">Finish this layer</button>`
+            : `<button class="btn btn-primary" onclick="finishLevel()">Finish this layer</button>`) : ''}
       </div>
       <div class="compare-build-columns">
         <div class="compare-col"><div class="compare-col-title">${escapeHtml(nameA)}</div>${renderCompareSourceColumn('a', editable)}</div>
@@ -2637,7 +2637,7 @@ function renderAdminStatistics(){
     </div>
     <div class="card-hint" style="margin:16px 0 8px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; font-size:11.5px;">Recently added</div>
     <table class="admin-table"><thead><tr>
-      <th>Level</th><th>This week</th><th>This month</th><th>This year</th>
+      <th>Layer</th><th>This week</th><th>This month</th><th>This year</th>
     </tr></thead><tbody>
       ${['l1','l2','l3','l4','l5'].map(level=>{
         const r = cs.recentlyAdded[level];
@@ -2672,7 +2672,7 @@ function renderAdminStatistics(){
     <div class="subblock-title" style="margin:24px 0 10px;">Process Mapping progress</div>
     ${ms.length===0 ? `<div class="empty-note">No comparisons yet.</div>` : `
     <table class="admin-table"><thead><tr>
-      <th>Comparison</th><th>Merged</th><th>Adopted</th><th>Adopted</th><th>New</th><th>Open</th><th>Eliminated</th><th>Finished levels</th>
+      <th>Comparison</th><th>Merged</th><th>Adopted</th><th>Adopted</th><th>New</th><th>Open</th><th>Eliminated</th><th>Finished layers</th>
     </tr></thead><tbody>
       ${ms.map(s=>`<tr>
         <td>${escapeHtml(s.nameA)} ↔ ${escapeHtml(s.nameB)}</td>
