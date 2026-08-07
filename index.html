@@ -126,15 +126,13 @@
   .tree-l4{ font-weight:400; font-size:13px; color:var(--gray-700); margin:2px 0 2px 48px; }
   .tree-l5{ font-weight:400; font-style:italic; font-size:12.5px; color:var(--gray-400); margin:2px 0 2px 64px; }
   .tree-l2-divider{ height:1px; background:var(--gray-200); margin:8px 16px; }
-  /* Highlight is applied per-line only (never a wrapper spanning several
-     lines), so it can never disturb the DOM nesting the rest of the tree's
-     indentation depends on. Each level restates its own margin-left, shifted
-     left by the highlight's own padding so the text doesn't visibly move. */
-  .tree-highlight{ background:var(--gray-100); border-radius:6px; padding:2px 6px; }
-  .tree-l2.tree-highlight{ margin-left:10px; }
-  .tree-l3.tree-highlight{ margin-left:26px; }
-  .tree-l4.tree-highlight{ margin-left:42px; }
-  .tree-l5.tree-highlight{ margin-left:58px; }
+  /* One wrapper per contiguous highlighted run, full width edge-to-edge
+     (no horizontal margin/padding of its own) so its width always matches
+     .tree-process's content box exactly, same as every other row — only
+     its height varies with how many lines it contains. Children inside
+     keep their own normal .tree-lN margin-left untouched, so nesting them
+     in this wrapper can never affect their indentation. */
+  .tree-highlight-block{ background:var(--gray-100); border-radius:8px; margin:2px 0; }
   .tree-empty{ text-align:center; color:var(--gray-400); font-size:13.5px; padding:40px 10px; line-height:1.7; }
 
   .dash-list{ display:flex; flex-direction:column; gap:10px; }
@@ -3041,9 +3039,6 @@ function updateEditorTree(){
   // nested under it is also part of what's "currently being worked on", so
   // the highlight cascades down through its whole subtree — but never
   // upward to its parents/siblings, since those aren't part of this scope.
-  // Each line still gets the highlight class independently (no shared
-  // wrapper div spans a range) so cascading can never disturb another
-  // line's own indentation/nesting.
   const selSp = p.l2_locked ? (p.subprocesses.find(s=>s.id===state.editorSelectedSpId) || null) : null;
   const selStep = (selSp && selSp.l3_locked) ? (selSp.steps.find(s=>s.id===state.editorSelectedStepId) || null) : null;
   const selTask = (selStep && selStep.l4_locked) ? (selStep.tasks.find(t=>t.id===state.editorSelectedTaskId) || null) : null;
@@ -3052,27 +3047,42 @@ function updateEditorTree(){
   else if(selStep){ highlightStepId = selStep.id; }
   else if(selSp){ highlightSpId = selSp.id; }
 
+  // The highlighted run is wrapped in one full-width, zero-horizontal-margin
+  // box — its width is therefore always identical to a plain row's (both
+  // are unconstrained block children of .tree-process), only its height
+  // changes as lines join/leave the wrapper. Children keep rendering with
+  // their own normal .tree-lN margin-left, completely untouched by the
+  // wrapper, so nesting them here can never affect indentation.
   let h = '';
+  let groupOpen = false;
+  function closeGroup(){ if(groupOpen){ h += `</div>`; groupOpen = false; } }
+  function emitLine(level, isOn, text){
+    if(isOn && !groupOpen){ h += `<div class="tree-highlight-block">`; groupOpen = true; }
+    else if(!isOn){ closeGroup(); }
+    h += `<div class="tree-l${level}">${escapeHtml(text)}</div>`;
+  }
+
   if(p.l1_name){
     h += `<div class="tree-process"><div class="tree-l1">${escapeHtml(p.l1_name)}</div>`;
     const namedSubprocesses = p.subprocesses.filter(sp=>sp.name.trim());
     namedSubprocesses.forEach((sp, spIdx)=>{
       const spOn = highlightSpId === sp.id;
-      h += `<div class="tree-l2 ${spOn ? 'tree-highlight' : ''}">${escapeHtml(sp.name)}</div>`;
+      emitLine(2, spOn, sp.name);
       sp.steps.forEach(st=>{
         if(!st.text.trim()) return;
         const stepOn = spOn || highlightStepId === st.id;
-        h += `<div class="tree-l3 ${stepOn ? 'tree-highlight' : ''}">${escapeHtml(st.text)}</div>`;
+        emitLine(3, stepOn, st.text);
         st.tasks.forEach(task=>{
           if(!task.text.trim()) return;
           const taskOn = stepOn || highlightTaskId === task.id;
-          h += `<div class="tree-l4 ${taskOn ? 'tree-highlight' : ''}">${escapeHtml(task.text)}</div>`;
+          emitLine(4, taskOn, task.text);
           task.work_instructions.forEach(wi=>{
             if(!wi.text.trim()) return;
-            h += `<div class="tree-l5 ${taskOn ? 'tree-highlight' : ''}">${escapeHtml(wi.text)}</div>`;
+            emitLine(5, taskOn, wi.text);
           });
         });
       });
+      closeGroup();
       if(spIdx < namedSubprocesses.length-1) h += `<div class="tree-l2-divider"></div>`;
     });
     h += `</div>`;
