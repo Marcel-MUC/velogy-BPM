@@ -45,8 +45,6 @@
   .btn-ghost:hover:not(:disabled){ background:var(--gray-100); }
   .btn-primary{ background:var(--violet); color:#fff; }
   .btn-primary:hover:not(:disabled){ background:var(--violet-dark); }
-  .btn-dark{ background:var(--navy); border-color:var(--navy); color:#fff; }
-  .btn-dark:hover:not(:disabled){ background:#1a1240; }
   .btn-danger{ background:#fff; border-color:var(--red); color:var(--red); }
   .btn-danger:hover:not(:disabled){ background:var(--red-bg); }
   .pill{ font-family:var(--mono); font-size:12px; font-weight:700; padding:5px 11px; border-radius:999px; text-transform:uppercase; letter-spacing:.02em; }
@@ -85,37 +83,29 @@
   .card.disabled{ opacity:.55; }
   .card-head{ display:flex; flex-direction:column; align-items:flex-start; gap:4px; margin-bottom:12px; }
   .card-head-left{ display:flex; align-items:center; gap:10px; }
-  .badge{ font-family:var(--mono); font-size:12.5px; font-weight:700; color:#fff; padding:4px 9px; border-radius:8px; }
-  .badge-purple{ background:var(--violet); } .badge-navy{ background:var(--navy); }
-  .badge-gray{ background:var(--gray-400); } .badge-green{ background:var(--green); }
+  .card-level-label{ opacity:.5; font-weight:600; }
   .card-title{ font-weight:800; font-size:17.5px; }
   .card-hint{ font-size:12.5px; color:var(--gray-500); font-style:italic; }
   .card-desc{ font-size:13px; color:var(--gray-500); margin-bottom:16px; }
   .lock-btn{ width:100%; margin-top:10px; padding:10px; border:none; border-radius:8px; background:var(--violet);
     color:#fff; font-weight:700; font-size:13.5px; cursor:pointer; }
   .lock-btn:disabled{ background:var(--violet-light); color:var(--violet); cursor:not-allowed; }
-  .lock-btn.done-btn{ background:var(--green); }
-  .saved-indicator{ flex:1; padding:9px 14px; border:1px solid var(--green-border); border-radius:8px;
-    background:var(--green-bg); color:var(--green); font-weight:600; font-size:13.5px;
-    display:flex; align-items:center; justify-content:center; gap:6px; }
+  .saved-row{ display:flex; align-items:center; gap:12px; margin-top:10px; padding-top:10px; border-top:1px solid var(--gray-100); }
+  .saved-row-label{ flex:1; color:var(--gray-500); font-size:13.5px; font-weight:600; }
   .row-input{ display:flex; gap:8px; margin-bottom:8px; align-items:center; }
   .row-input input{ flex:1; }
   .icon-btn{ background:none; border:none; color:var(--red); font-size:15px; cursor:pointer; width:26px; flex-shrink:0; }
   .empty-note{ color:var(--gray-400); font-size:13px; font-style:italic; padding:6px 0; }
-  .sp-row{ padding:8px 14px; border-radius:10px; margin-bottom:6px; cursor:pointer; font-size:14.5px; font-weight:700;
-    border:1px solid var(--gray-200); background:#fff; color:var(--gray-800); transition:all .12s ease;
-    display:flex; justify-content:space-between; align-items:center; gap:10px; }
-  .sp-row:hover:not(.sel){ background:var(--gray-50); }
-  .sp-row.sel{ background:var(--navy); border-color:var(--navy); color:#fff; }
-  .row-pill{ font-size:12px; font-weight:600; padding:3px 10px; border-radius:999px; white-space:nowrap; }
-  .row-pill.active{ background:rgba(255,255,255,.18); color:#fff; }
-  .row-pill.todo{ background:none; color:var(--gray-500); font-weight:500; padding:3px 0; }
+  .sp-row{ padding:9px 4px; border-bottom:1px solid var(--gray-100); cursor:pointer; font-size:14.5px; font-weight:600;
+    color:var(--gray-800); transition:color .12s ease; display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .sp-row:last-child{ border-bottom:none; }
+  .sp-row:hover:not(.sel):not(.static){ color:var(--violet-dark); }
+  .sp-row.sel{ font-weight:800; color:var(--gray-900); }
+  .row-pill{ font-size:12px; font-weight:500; color:var(--gray-500); white-space:nowrap; }
+  .row-pill.active{ color:var(--gray-700); font-weight:600; }
   .row-chevron{ font-size:16px; color:var(--gray-400); flex-shrink:0; }
-  .sp-row.sel .row-chevron{ color:rgba(255,255,255,.6); }
-  .company-process-row{ background:#fff; }
-  .sp-row.company-process-row:hover{ background:var(--violet-light); }
   .sp-row.static{ cursor:default; }
-  .sp-row.static:hover{ background:#fff; }
+  .sp-row.static:hover{ color:var(--gray-800); }
   .subblock{ border-left:3px solid var(--violet-light); padding-left:12px; margin-bottom:14px; }
   .subblock-title{ font-weight:700; font-size:13px; color:var(--navy); margin-bottom:8px; }
   .step-line{ display:flex; align-items:center; gap:8px; padding:7px 0; border-bottom:1px dashed var(--gray-200); }
@@ -650,6 +640,7 @@ function toggleSpSelection(spId){
   state.editorSelectedTaskId = null;
   renderEditorLeftPanel();
   updateEditorTree();
+  updateEditorBreadcrumb();
 }
 function findStep(spId, stepId){ return findSp(spId).steps.find(s=>s.id===stepId); }
 function findTask(spId, stepId, taskId){ return findStep(spId, stepId).tasks.find(t=>t.id===taskId); }
@@ -658,11 +649,13 @@ function toggleStepSelection(stepId){
   state.editorSelectedTaskId = null;
   renderEditorLeftPanel();
   updateEditorTree();
+  updateEditorBreadcrumb();
 }
 function toggleTaskSelection(taskId){
   state.editorSelectedTaskId = (state.editorSelectedTaskId === taskId) ? null : taskId;
   renderEditorLeftPanel();
   updateEditorTree();
+  updateEditorBreadcrumb();
 }
 /* --- text edits (debounced db write, no full re-render) --- */
 function refreshSaveButton(btnId, enabled){
@@ -2292,7 +2285,7 @@ function renderCompanySelect(){
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px; padding-left:16px;">
       <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Overview</div>
       <div class="actions">
-        ${state.profile.role==='admin' ? `<button class="btn btn-dark" onclick="openNewCompanyModal()">+ Add company</button>` : ''}
+        ${state.profile.role==='admin' ? `<button class="btn btn-primary" onclick="openNewCompanyModal()">+ Add company</button>` : ''}
         <button class="btn btn-ghost" onclick="exportExcel()">⭳ Export all</button>
       </div>
     </div>
@@ -2325,10 +2318,11 @@ function renderCompanyList(){
 
 function renderCompanyMegaCycles(c){
   if(c.processes.length===0) return `<div class="empty-note" style="padding:10px 0 0;">No mega-cycles yet for this company.${state.profile.role==='admin' ? ' Add some via the ⋯ menu.' : ''}</div>`;
-  return `<div style="margin-top:12px; display:flex; flex-direction:column; gap:8px;" onclick="event.stopPropagation()">
+  return `<div style="margin-top:12px;" onclick="event.stopPropagation()">
       ${c.processes.map(p=>{
-        return `<div class="sp-row company-process-row" onclick="openEditor('${p.id}')">
+        return `<div class="sp-row" onclick="openEditor('${p.id}')">
           <span>${escapeHtml(p.l1_name)}</span>
+          <span class="row-chevron">›</span>
         </div>`;
       }).join('')}
     </div>`;
@@ -2792,9 +2786,10 @@ function renderEditor(){
       </div>
       <div class="actions">
         <button class="btn btn-ghost" style="width:120px; height:40px; display:inline-flex; align-items:center; justify-content:center;" onclick="backToCompanies()">Home</button>
-        <button class="btn btn-dark" style="width:120px; height:40px; display:inline-flex; align-items:center; justify-content:center;" onclick="exportExcel(state.editorProcess.id)">⭳ Export</button>
+        <button class="btn btn-ghost" style="width:120px; height:40px; display:inline-flex; align-items:center; justify-content:center;" onclick="exportExcel(state.editorProcess.id)">⭳ Export</button>
       </div>
     </div>
+    <div class="compare-breadcrumb-bar" id="editorBreadcrumb" style="margin-left:8px;">${renderEditorBreadcrumb()}</div>
     <div class="grid">
       <div id="editorLeft"></div>
       <div class="card" style="position:sticky; top:20px;">
@@ -2810,12 +2805,43 @@ function renderEditor(){
 }
 
 function renderSavedRow(unlockCall){
-  return `<div style="display:flex; align-items:center; gap:8px; margin-top:10px;">
-    <div class="saved-indicator">✓ Saved</div>
-    <button class="btn btn-ghost" onclick="${unlockCall}">Edit</button>
+  return `<div class="saved-row">
+    <span class="saved-row-label">Saved</span>
+    <button class="link-btn" onclick="${unlockCall}">Edit</button>
   </div>`;
 }
 
+function renderEditorBreadcrumb(){
+  const p = state.editorProcess;
+  const companyName = p.companies ? p.companies.name : '';
+  const selSp = p.l2_locked ? (p.subprocesses.find(s=>s.id===state.editorSelectedSpId) || null) : null;
+  const selStep = (selSp && selSp.l3_locked) ? (selSp.steps.find(s=>s.id===state.editorSelectedStepId) || null) : null;
+  const selTask = (selStep && selStep.l4_locked) ? (selStep.tasks.find(t=>t.id===state.editorSelectedTaskId) || null) : null;
+  const segments = [
+    { label: companyName || '—', onClick: 'backToCompanies()' },
+    { label: p.l1_name || '(untitled)', onClick: 'editorBreadcrumbTo(1)' }
+  ];
+  if(selSp) segments.push({ label: selSp.name || '(untitled)', onClick: 'editorBreadcrumbTo(2)' });
+  if(selStep) segments.push({ label: selStep.text || '(untitled)', onClick: 'editorBreadcrumbTo(3)' });
+  if(selTask) segments.push({ label: selTask.text || '(untitled)', onClick: 'editorBreadcrumbTo(4)' });
+  return segments.map((seg, idx)=>{
+    const isCurrent = idx === segments.length-1;
+    const sep = idx>0 ? `<span class="compare-crumb-sep">›</span>` : '';
+    return `${sep}<span class="compare-crumb ${isCurrent?'current':''}" onclick="${seg.onClick}">${escapeHtml(seg.label)}</span>`;
+  }).join('');
+}
+function editorBreadcrumbTo(level){
+  if(level<=1){ state.editorSelectedSpId=null; state.editorSelectedStepId=null; state.editorSelectedTaskId=null; }
+  else if(level===2){ state.editorSelectedStepId=null; state.editorSelectedTaskId=null; }
+  else if(level===3){ state.editorSelectedTaskId=null; }
+  renderEditorLeftPanel();
+  updateEditorTree();
+  updateEditorBreadcrumb();
+}
+function updateEditorBreadcrumb(){
+  const el = document.getElementById('editorBreadcrumb');
+  if(el) el.innerHTML = renderEditorBreadcrumb();
+}
 function rowStatusHtml(isSel){
   const isViewer = !state.editorCanEdit;
   const pillClass = isSel ? 'active' : 'todo';
@@ -2843,7 +2869,7 @@ function renderEditorLeftPanel(){
   let html = '';
 
   html += `<div class="card ${c2}">
-    <div class="card-head" style="${p.l2_locked?'opacity:.5;':''}"><div class="card-head-left"><span class="badge badge-purple">L2</span><span class="card-title">Sub-processes</span></div>
+    <div class="card-head" style="${p.l2_locked?'opacity:.5;':''}"><div class="card-head-left"><span class="card-title">Sub-processes <span class="card-level-label">(L2)</span></span></div>
     <span class="card-hint">short noun phrases</span></div>`;
   if(!p.l2_locked){
     if(p.subprocesses.length===0) html += `<div class="empty-note">No sub-processes yet.</div>`;
@@ -2877,7 +2903,7 @@ function renderEditorLeftPanel(){
 
   /* ---------- L3: steps of the selected sub-process ---------- */
   html += `<div class="card ${c3}">
-    <div class="card-head" style="${(selSp&&selSp.l3_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="badge ${p.l2_locked?'badge-navy':'badge-gray'}">L3</span><span class="card-title">Process steps</span></div>
+    <div class="card-head" style="${(selSp&&selSp.l3_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="card-title">Process steps <span class="card-level-label">(L3)</span></span></div>
     <span class="card-hint">verb first: "create...", "check..."</span></div>`;
   if(!p.l2_locked){ html += `<div class="empty-note">Save L2 first to add process steps.</div>`; }
   else if(p.subprocesses.length===0){ html += `<div class="empty-note">No sub-processes yet — add one in L2 above.</div>`; }
@@ -2917,7 +2943,7 @@ function renderEditorLeftPanel(){
 
   /* ---------- L4: tasks of the selected step ---------- */
   html += `<div class="card ${c4}">
-    <div class="card-head" style="${(selStep&&selStep.l4_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="badge ${(selSp&&selSp.l3_locked)?'badge-navy':'badge-gray'}">L4</span><span class="card-title">Tasks</span></div>
+    <div class="card-head" style="${(selStep&&selStep.l4_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="card-title">Tasks <span class="card-level-label">(L4)</span></span></div>
     <span class="card-hint">verb + object, e.g. "Enter customer ID"</span></div>`;
   if(!selSp || !selSp.l3_locked){ html += `<div class="empty-note">Save L3 for a sub-process first, then select a step.</div>`; }
   else if(!selStep){ html += `<div class="empty-note">Click a step in L3 above to work on its tasks here.</div>`; }
@@ -2956,7 +2982,7 @@ function renderEditorLeftPanel(){
 
   /* ---------- L5: work instructions of the selected task ---------- */
   html += `<div class="card ${c5}">
-    <div class="card-head" style="${(selTask&&selTask.l5_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="badge ${selTask?'badge-green':'badge-gray'}">L5</span><span class="card-title">Work instructions</span></div>
+    <div class="card-head" style="${(selTask&&selTask.l5_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="card-title">Work instructions <span class="card-level-label">(L5)</span></span></div>
     <span class="card-hint">System-specific: transaction codes, field names, key actions.</span></div>`;
   if(!selStep || !selStep.l4_locked){
     html += `<div class="empty-note">Save L4 for a step first, then select a task.</div>`;
