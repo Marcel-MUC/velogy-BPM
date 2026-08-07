@@ -3012,33 +3012,40 @@ function updateEditorTree(){
     <div class="stat"><div class="l">L4</div><div class="n">${l4c}</div></div>
     <div class="stat"><div class="l">L5</div><div class="n">${l5c}</div></div>`;
 
-  // The deepest currently-selected item (mirrors renderEditorLeftPanel's own
-  // selSp/selStep/selTask resolution) gets the tree highlight — never its
-  // ancestors or descendants, even though a parent id is technically still
-  // "selected" on the way down to the deepest one.
+  // The active editing scope is the deepest currently-selected item (mirrors
+  // renderEditorLeftPanel's own selSp/selStep/selTask resolution). Everything
+  // nested under it is also part of what's "currently being worked on", so
+  // the highlight cascades down through its whole subtree — but never
+  // upward to its parents/siblings, since those aren't part of this scope.
+  // Each line still gets the highlight class independently (no shared
+  // wrapper div spans a range) so cascading can never disturb another
+  // line's own indentation/nesting.
   const selSp = p.l2_locked ? (p.subprocesses.find(s=>s.id===state.editorSelectedSpId) || null) : null;
   const selStep = (selSp && selSp.l3_locked) ? (selSp.steps.find(s=>s.id===state.editorSelectedStepId) || null) : null;
   const selTask = (selStep && selStep.l4_locked) ? (selStep.tasks.find(t=>t.id===state.editorSelectedTaskId) || null) : null;
-  let highlightLevel = null, highlightId = null;
-  if(selTask){ highlightLevel = 'l4'; highlightId = selTask.id; }
-  else if(selStep){ highlightLevel = 'l3'; highlightId = selStep.id; }
-  else if(selSp){ highlightLevel = 'l2'; highlightId = selSp.id; }
+  let highlightSpId = null, highlightStepId = null, highlightTaskId = null;
+  if(selTask){ highlightTaskId = selTask.id; }
+  else if(selStep){ highlightStepId = selStep.id; }
+  else if(selSp){ highlightSpId = selSp.id; }
 
   let h = '';
   if(p.l1_name){
     h += `<div class="tree-process"><div class="tree-l1">${escapeHtml(p.l1_name)}</div>`;
     const namedSubprocesses = p.subprocesses.filter(sp=>sp.name.trim());
     namedSubprocesses.forEach((sp, spIdx)=>{
-      h += `<div class="tree-l2 ${highlightLevel==='l2' && highlightId===sp.id ? 'tree-highlight' : ''}">${escapeHtml(sp.name)}</div>`;
+      const spOn = highlightSpId === sp.id;
+      h += `<div class="tree-l2 ${spOn ? 'tree-highlight' : ''}">${escapeHtml(sp.name)}</div>`;
       sp.steps.forEach(st=>{
         if(!st.text.trim()) return;
-        h += `<div class="tree-l3 ${highlightLevel==='l3' && highlightId===st.id ? 'tree-highlight' : ''}">${escapeHtml(st.text)}</div>`;
+        const stepOn = spOn || highlightStepId === st.id;
+        h += `<div class="tree-l3 ${stepOn ? 'tree-highlight' : ''}">${escapeHtml(st.text)}</div>`;
         st.tasks.forEach(task=>{
           if(!task.text.trim()) return;
-          h += `<div class="tree-l4 ${highlightLevel==='l4' && highlightId===task.id ? 'tree-highlight' : ''}">${escapeHtml(task.text)}</div>`;
+          const taskOn = stepOn || highlightTaskId === task.id;
+          h += `<div class="tree-l4 ${taskOn ? 'tree-highlight' : ''}">${escapeHtml(task.text)}</div>`;
           task.work_instructions.forEach(wi=>{
             if(!wi.text.trim()) return;
-            h += `<div class="tree-l5">${escapeHtml(wi.text)}</div>`;
+            h += `<div class="tree-l5 ${taskOn ? 'tree-highlight' : ''}">${escapeHtml(wi.text)}</div>`;
           });
         });
       });
