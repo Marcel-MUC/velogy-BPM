@@ -2101,7 +2101,7 @@ function renderCompare(){
   const headerBlock = `
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:12px; padding-left:16px;">
       <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Compare: ${escapeHtml(nameA)} ↔ ${escapeHtml(nameB)}</div>
-      <button class="btn btn-ghost" onclick="openComparePicker()">Home</button>
+      <button class="btn btn-ghost" style="width:120px; height:40px; display:inline-flex; align-items:center; justify-content:center;" onclick="openComparePicker()">Home</button>
     </div>
     <div class="compare-breadcrumb-bar">${renderCompareBreadcrumb()}</div>`;
 
