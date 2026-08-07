@@ -96,13 +96,14 @@
   .row-input input{ flex:1; }
   .icon-btn{ background:none; border:none; color:var(--red); font-size:15px; cursor:pointer; width:26px; flex-shrink:0; }
   .empty-note{ color:var(--gray-400); font-size:13px; font-style:italic; padding:6px 0; }
-  .sp-row{ padding:9px 4px; border-bottom:1px solid var(--gray-100); cursor:pointer; font-size:14.5px; font-weight:600;
-    color:var(--gray-800); transition:color .12s ease; display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .sp-row{ padding:9px 10px; margin:0 -10px; border-bottom:1px solid var(--gray-100); border-radius:8px;
+    cursor:pointer; font-size:14.5px; font-weight:600; color:var(--gray-800); transition:all .12s ease;
+    display:flex; justify-content:space-between; align-items:center; gap:10px; }
   .sp-row:last-child{ border-bottom:none; }
   .sp-row:hover:not(.sel):not(.static){ color:var(--violet-dark); }
-  .sp-row.sel{ font-weight:800; color:var(--gray-900); }
+  .sp-row.sel{ font-weight:800; color:var(--violet-dark); background:var(--violet-light); border-bottom-color:transparent; }
   .row-pill{ font-size:12px; font-weight:500; color:var(--gray-500); white-space:nowrap; }
-  .row-pill.active{ color:var(--gray-700); font-weight:600; }
+  .row-pill.active{ color:var(--violet-dark); font-weight:600; }
   .row-chevron{ font-size:16px; color:var(--gray-400); flex-shrink:0; }
   .sp-row.static{ cursor:default; }
   .sp-row.static:hover{ color:var(--gray-800); }
