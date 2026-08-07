@@ -2323,7 +2323,7 @@ function renderCompanyMegaCycles(c){
       ${c.processes.map(p=>{
         return `<div class="sp-row" onclick="openEditor('${p.id}')">
           <span>${escapeHtml(p.l1_name)}</span>
-          <span class="row-chevron">›</span>
+          <span class="link-btn" style="pointer-events:none;">Open L2 ›</span>
         </div>`;
       }).join('')}
     </div>`;
