@@ -135,11 +135,15 @@
   .tree-l4{ font-weight:400; font-size:13px; color:var(--gray-700); margin:2px 0 2px 48px; }
   .tree-l5{ font-weight:400; font-style:italic; font-size:12.5px; color:var(--gray-400); margin:2px 0 2px 64px; }
   .tree-l2-divider{ height:1px; background:var(--gray-200); margin:8px 16px; }
-  .tree-highlight-group{ background:var(--gray-100); border-radius:8px; padding:4px 12px; margin-top:4px; margin-bottom:4px; margin-right:16px; }
-  .tree-highlight-group .tree-l2{ margin-left:0; }
-  .tree-highlight-group .tree-l3{ margin-left:16px; }
-  .tree-highlight-group .tree-l4{ margin-left:32px; }
-  .tree-highlight-group .tree-l5{ margin-left:48px; }
+  /* Highlight is applied per-line only (never a wrapper spanning several
+     lines), so it can never disturb the DOM nesting the rest of the tree's
+     indentation depends on. Each level restates its own margin-left, shifted
+     left by the highlight's own padding so the text doesn't visibly move. */
+  .tree-highlight{ background:var(--gray-100); border-radius:6px; padding:2px 6px; }
+  .tree-l2.tree-highlight{ margin-left:10px; }
+  .tree-l3.tree-highlight{ margin-left:26px; }
+  .tree-l4.tree-highlight{ margin-left:42px; }
+  .tree-l5.tree-highlight{ margin-left:58px; }
   .tree-empty{ text-align:center; color:var(--gray-400); font-size:13.5px; padding:40px 10px; line-height:1.7; }
 
   .dash-list{ display:flex; flex-direction:column; gap:10px; }
@@ -3008,63 +3012,40 @@ function updateEditorTree(){
     <div class="stat"><div class="l">L4</div><div class="n">${l4c}</div></div>
     <div class="stat"><div class="l">L5</div><div class="n">${l5c}</div></div>`;
 
-  // The active editing scope is the deepest currently-selected item (mirrors
-  // renderEditorLeftPanel's own selSp/selStep/selTask resolution). Everything
-  // nested under it is also part of what's "currently being worked on", so
-  // the highlight cascades down through its whole subtree — but never
-  // upward to its parents/siblings, since those aren't part of this scope.
+  // The deepest currently-selected item (mirrors renderEditorLeftPanel's own
+  // selSp/selStep/selTask resolution) gets the tree highlight — never its
+  // ancestors or descendants, even though a parent id is technically still
+  // "selected" on the way down to the deepest one.
   const selSp = p.l2_locked ? (p.subprocesses.find(s=>s.id===state.editorSelectedSpId) || null) : null;
   const selStep = (selSp && selSp.l3_locked) ? (selSp.steps.find(s=>s.id===state.editorSelectedStepId) || null) : null;
   const selTask = (selStep && selStep.l4_locked) ? (selStep.tasks.find(t=>t.id===state.editorSelectedTaskId) || null) : null;
-  let highlightSpId = null, highlightStepId = null, highlightTaskId = null;
-  if(selTask){ highlightTaskId = selTask.id; }
-  else if(selStep){ highlightStepId = selStep.id; }
-  else if(selSp){ highlightSpId = selSp.id; }
+  let highlightLevel = null, highlightId = null;
+  if(selTask){ highlightLevel = 'l4'; highlightId = selTask.id; }
+  else if(selStep){ highlightLevel = 'l3'; highlightId = selStep.id; }
+  else if(selSp){ highlightLevel = 'l2'; highlightId = selSp.id; }
 
-  // Highlighted lines are wrapped in one shrink-to-fit box per contiguous
-  // run (there's only ever one run, since exactly one scope can be active),
-  // instead of boxing each line separately — the box sits at the run's own
-  // indent level and stays open across levels while `isOn` keeps holding.
   let h = '';
-  let groupOpen = false;
-  const LEVEL_MARGIN = {2:16, 3:32, 4:48, 5:64};
-  function closeGroup(){ if(groupOpen){ h += `</div>`; groupOpen = false; } }
-  function emitLine(level, isOn, text){
-    if(isOn && !groupOpen){
-      h += `<div class="tree-highlight-group" style="margin-left:${LEVEL_MARGIN[level]}px;">`;
-      groupOpen = true;
-    } else if(!isOn){
-      closeGroup();
-    }
-    h += `<div class="tree-l${level}">${escapeHtml(text)}</div>`;
-  }
-
   if(p.l1_name){
     h += `<div class="tree-process"><div class="tree-l1">${escapeHtml(p.l1_name)}</div>`;
     const namedSubprocesses = p.subprocesses.filter(sp=>sp.name.trim());
     namedSubprocesses.forEach((sp, spIdx)=>{
-      const spOn = highlightSpId === sp.id;
-      emitLine(2, spOn, sp.name);
+      h += `<div class="tree-l2 ${highlightLevel==='l2' && highlightId===sp.id ? 'tree-highlight' : ''}">${escapeHtml(sp.name)}</div>`;
       sp.steps.forEach(st=>{
         if(!st.text.trim()) return;
-        const stepOn = spOn || highlightStepId === st.id;
-        emitLine(3, stepOn, st.text);
+        h += `<div class="tree-l3 ${highlightLevel==='l3' && highlightId===st.id ? 'tree-highlight' : ''}">${escapeHtml(st.text)}</div>`;
         st.tasks.forEach(task=>{
           if(!task.text.trim()) return;
-          const taskOn = stepOn || highlightTaskId === task.id;
-          emitLine(4, taskOn, task.text);
+          h += `<div class="tree-l4 ${highlightLevel==='l4' && highlightId===task.id ? 'tree-highlight' : ''}">${escapeHtml(task.text)}</div>`;
           task.work_instructions.forEach(wi=>{
             if(!wi.text.trim()) return;
-            emitLine(5, taskOn, wi.text);
+            h += `<div class="tree-l5">${escapeHtml(wi.text)}</div>`;
           });
         });
       });
-      closeGroup();
       if(spIdx < namedSubprocesses.length-1) h += `<div class="tree-l2-divider"></div>`;
     });
     h += `</div>`;
   }
-  closeGroup();
   const treeEl = document.getElementById('treeBody');
   if(treeEl) treeEl.innerHTML = h.trim() ? h : `<div class="tree-empty">Nothing captured yet.</div>`;
 }
