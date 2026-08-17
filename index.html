@@ -3064,25 +3064,23 @@ function updateEditorTree(){
     else if(!isOn){ closeGroup(); }
     h += `<div class="tree-l${level}">${innerHtml}</div>`;
   }
-  // A collapsible node (L3 step / L4 task) is expanded if it's manually been
-  // toggled open, OR if it falls within the currently-selected item's own
-  // cascade (the same spOn/stepOn/taskOn booleans driving the highlight) —
-  // that cascade is unioned into the set as we go, so the tree always opens
-  // exactly along whatever's highlighted, without a separate "auto path"
-  // tracked apart from the real selection state. Once added, a node stays
-  // in the set (and thus expanded) even if the selection later moves on,
-  // until the admin manually collapses it again.
+  // A childless node renders as a plain, non-collapsible line — no chevron,
+  // no summary, nothing to hide. A node WITH children is expanded either
+  // because it's on the current selection's cascade (isOn, recomputed fresh
+  // every render from live selection state — never persisted) or because
+  // the admin manually toggled it open (state.editorTreeExpanded, which IS
+  // persisted). Only the manual set survives a selection change; isOn drops
+  // back to false for whatever was on the old path, so moving the selection
+  // elsewhere collapses it automatically without touching manual toggles
+  // made on unrelated branches.
   function collapsibleLine(level, id, isOn, text, childCount, childWord){
-    const hasChildren = childCount>0;
-    if(hasChildren && isOn) state.editorTreeExpanded.add(id);
-    const expanded = hasChildren ? state.editorTreeExpanded.has(id) : true;
-    const chevron = hasChildren
-      ? `<span class="tree-chevron" onclick="toggleTreeNode('${id}')">${expanded?'▾':'▸'}</span>`
-      : '';
-    const plural = childWord + 's';
-    const summary = !hasChildren
-      ? `<span class="tree-summary"> · no ${plural} yet</span>`
-      : (!expanded ? `<span class="tree-summary"> · ${childCount} ${childCount===1?childWord:plural}</span>` : '');
+    if(childCount===0){
+      emitLine(level, isOn, escapeHtml(text));
+      return true;
+    }
+    const expanded = isOn || state.editorTreeExpanded.has(id);
+    const chevron = `<span class="tree-chevron" onclick="toggleTreeNode('${id}')">${expanded?'▾':'▸'}</span>`;
+    const summary = expanded ? '' : `<span class="tree-summary"> · ${childCount} ${childCount===1?childWord:childWord+'s'}</span>`;
     emitLine(level, isOn, `${chevron}${escapeHtml(text)}${summary}`);
     return expanded;
   }
