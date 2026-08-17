@@ -126,6 +126,8 @@
   .tree-l4{ font-weight:500; font-size:13.5px; color:var(--gray-800); margin:2px 0 2px 48px; }
   .tree-l5{ font-weight:500; font-style:italic; font-size:13px; color:var(--gray-700); margin:2px 0 2px 64px; }
   .tree-l2-divider{ height:1px; background:var(--gray-200); margin:8px 16px; }
+  .tree-chevron{ display:inline-block; width:14px; color:var(--gray-400); cursor:pointer; user-select:none; }
+  .tree-summary{ color:var(--gray-400); font-weight:400; font-size:0.9em; }
   /* One wrapper per contiguous highlighted run, full width edge-to-edge
      (no horizontal margin/padding of its own) so its width always matches
      .tree-process's content box exactly, same as every other row — only
@@ -613,6 +615,7 @@ async function openEditor(processId){
   state.editorSelectedStepId = null;
   state.editorSelectedTaskId = null;
   state.editingMegaCycle = false;
+  state.editorTreeExpanded = new Set();
   const { data: siblings } = await sb.from('processes').select('id, l1_name').eq('company_id', data.company_id).order('l1_name');
   state.editorSiblingProcesses = siblings || [];
   const { data: canEdit, error: canEditError } = await sb.rpc('can_edit', { target_company: data.company_id, target_process: data.id });
@@ -3056,10 +3059,32 @@ function updateEditorTree(){
   let h = '';
   let groupOpen = false;
   function closeGroup(){ if(groupOpen){ h += `</div>`; groupOpen = false; } }
-  function emitLine(level, isOn, text){
+  function emitLine(level, isOn, innerHtml){
     if(isOn && !groupOpen){ h += `<div class="tree-highlight-block">`; groupOpen = true; }
     else if(!isOn){ closeGroup(); }
-    h += `<div class="tree-l${level}">${escapeHtml(text)}</div>`;
+    h += `<div class="tree-l${level}">${innerHtml}</div>`;
+  }
+  // A collapsible node (L3 step / L4 task) is expanded if it's manually been
+  // toggled open, OR if it falls within the currently-selected item's own
+  // cascade (the same spOn/stepOn/taskOn booleans driving the highlight) —
+  // that cascade is unioned into the set as we go, so the tree always opens
+  // exactly along whatever's highlighted, without a separate "auto path"
+  // tracked apart from the real selection state. Once added, a node stays
+  // in the set (and thus expanded) even if the selection later moves on,
+  // until the admin manually collapses it again.
+  function collapsibleLine(level, id, isOn, text, childCount, childWord){
+    const hasChildren = childCount>0;
+    if(hasChildren && isOn) state.editorTreeExpanded.add(id);
+    const expanded = hasChildren ? state.editorTreeExpanded.has(id) : true;
+    const chevron = hasChildren
+      ? `<span class="tree-chevron" onclick="toggleTreeNode('${id}')">${expanded?'▾':'▸'}</span>`
+      : '';
+    const plural = childWord + 's';
+    const summary = !hasChildren
+      ? `<span class="tree-summary"> · no ${plural} yet</span>`
+      : (!expanded ? `<span class="tree-summary"> · ${childCount} ${childCount===1?childWord:plural}</span>` : '');
+    emitLine(level, isOn, `${chevron}${escapeHtml(text)}${summary}`);
+    return expanded;
   }
 
   if(p.l1_name){
@@ -3067,18 +3092,20 @@ function updateEditorTree(){
     const namedSubprocesses = p.subprocesses.filter(sp=>sp.name.trim());
     namedSubprocesses.forEach((sp, spIdx)=>{
       const spOn = highlightSpId === sp.id;
-      emitLine(2, spOn, sp.name);
+      emitLine(2, spOn, escapeHtml(sp.name));
       sp.steps.forEach(st=>{
         if(!st.text.trim()) return;
         const stepOn = spOn || highlightStepId === st.id;
-        emitLine(3, stepOn, st.text);
-        st.tasks.forEach(task=>{
-          if(!task.text.trim()) return;
+        const namedTasks = st.tasks.filter(t=>t.text.trim());
+        const stepExpanded = collapsibleLine(3, st.id, stepOn, st.text, namedTasks.length, 'task');
+        if(!stepExpanded) return;
+        namedTasks.forEach(task=>{
           const taskOn = stepOn || highlightTaskId === task.id;
-          emitLine(4, taskOn, task.text);
-          task.work_instructions.forEach(wi=>{
-            if(!wi.text.trim()) return;
-            emitLine(5, taskOn, wi.text);
+          const namedWIs = task.work_instructions.filter(w=>w.text.trim());
+          const taskExpanded = collapsibleLine(4, task.id, taskOn, task.text, namedWIs.length, 'work instruction');
+          if(!taskExpanded) return;
+          namedWIs.forEach(wi=>{
+            emitLine(5, taskOn, escapeHtml(wi.text));
           });
         });
       });
@@ -3089,6 +3116,11 @@ function updateEditorTree(){
   }
   const treeEl = document.getElementById('treeBody');
   if(treeEl) treeEl.innerHTML = h.trim() ? h : `<div class="tree-empty">Nothing captured yet.</div>`;
+}
+function toggleTreeNode(id){
+  if(state.editorTreeExpanded.has(id)) state.editorTreeExpanded.delete(id);
+  else state.editorTreeExpanded.add(id);
+  updateEditorTree();
 }
 
 init();
