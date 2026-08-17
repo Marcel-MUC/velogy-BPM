@@ -97,9 +97,31 @@
   .input-hint{ font-size:11.5px; color:var(--gray-400); font-style:italic; margin:-4px 0 8px 2px; }
   .input-hint:empty{ display:none; }
   .icon-btn{ background:none; border:none; color:var(--red); font-size:15px; cursor:pointer; width:26px; flex-shrink:0; }
-  .help-icon{ display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px;
-    border-radius:50%; background:var(--gray-200); color:var(--gray-500); font-size:10px; font-weight:700;
-    cursor:help; margin-left:6px; flex-shrink:0; vertical-align:middle; }
+  /* Quiet circular-outline "?" affordance, with a custom-styled tooltip
+     (card-like: white bg, soft shadow, rounded corners) replacing the
+     plain native title tooltip. .edge-left/.edge-right (added via JS,
+     see positionHelpTooltip) re-anchor the bubble when it would clip off
+     the left/right edge of the viewport. */
+  .help-icon{ position:relative; display:inline-flex; align-items:center; justify-content:center;
+    width:15px; height:15px; border-radius:50%; border:1.3px solid var(--gray-400); background:none;
+    color:var(--gray-400); font-size:9.5px; font-weight:700; line-height:1; cursor:help;
+    margin-left:6px; flex-shrink:0; vertical-align:middle; outline:none; }
+  .help-icon:hover, .help-icon:focus-visible{ border-color:var(--violet); color:var(--violet); }
+  .help-icon::after{ content:attr(data-tip); position:absolute; bottom:calc(100% + 9px); left:50%;
+    transform:translate(-50%, 4px); width:max-content; max-width:220px; background:#fff; color:var(--gray-900);
+    padding:8px 11px; border-radius:8px; box-shadow:0 6px 20px rgba(20,15,50,.16), 0 1px 2px rgba(20,15,50,.08);
+    font-size:12px; font-weight:500; line-height:1.45; text-align:left; white-space:normal;
+    opacity:0; visibility:hidden; pointer-events:none; transition:opacity .15s ease, transform .15s ease; z-index:200; }
+  .help-icon::before{ content:''; position:absolute; bottom:calc(100% + 3px); left:50%;
+    transform:translate(-50%, 4px); width:0; height:0; border:6px solid transparent; border-top-color:#fff;
+    filter:drop-shadow(0 2px 1px rgba(20,15,50,.08));
+    opacity:0; visibility:hidden; pointer-events:none; transition:opacity .15s ease, transform .15s ease; z-index:200; }
+  .help-icon:hover::after, .help-icon:focus-visible::after,
+  .help-icon:hover::before, .help-icon:focus-visible::before{ opacity:1; visibility:visible; transform:translate(-50%, 0); }
+  .help-icon.edge-left::after{ left:0; transform:translate(0, 4px); }
+  .help-icon.edge-left:hover::after, .help-icon.edge-left:focus-visible::after{ transform:translate(0, 0); }
+  .help-icon.edge-right::after{ left:auto; right:0; transform:translate(0, 4px); }
+  .help-icon.edge-right:hover::after, .help-icon.edge-right:focus-visible::after{ transform:translate(0, 0); }
   .empty-note{ color:var(--gray-400); font-size:13px; font-style:italic; padding:6px 0; }
   .sp-row{ padding:9px 10px; margin:0 -10px; border-bottom:1px solid var(--gray-100); border-radius:8px;
     cursor:pointer; font-size:14.5px; font-weight:600; color:var(--gray-800); transition:all .12s ease;
@@ -346,7 +368,16 @@ function escapeHtml(s){
 }
 
 function helpIcon(text){
-  return `<span class="help-icon" title="${escapeHtml(text)}">?</span>`;
+  const esc = escapeHtml(text);
+  return `<span class="help-icon" tabindex="0" role="img" aria-label="${esc}" data-tip="${esc}"
+    onmouseenter="positionHelpTooltip(this)" onfocus="positionHelpTooltip(this)">?</span>`;
+}
+function positionHelpTooltip(el){
+  el.classList.remove('edge-left','edge-right');
+  const rect = el.getBoundingClientRect();
+  const halfTooltip = 110; // half of the tooltip's max-width (220px)
+  if(rect.left - halfTooltip < 8) el.classList.add('edge-left');
+  else if(rect.right + halfTooltip > window.innerWidth - 8) el.classList.add('edge-right');
 }
 
 /* ================= ERROR NOTIFICATIONS (top-right, auto-dismiss) ================= */
