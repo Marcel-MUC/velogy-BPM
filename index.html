@@ -94,7 +94,12 @@
   .saved-row-label{ flex:1; color:var(--gray-500); font-size:13.5px; font-weight:600; }
   .row-input{ display:flex; gap:8px; margin-bottom:8px; align-items:center; }
   .row-input input{ flex:1; }
+  .input-hint{ font-size:11.5px; color:var(--gray-400); font-style:italic; margin:-4px 0 8px 2px; }
+  .input-hint:empty{ display:none; }
   .icon-btn{ background:none; border:none; color:var(--red); font-size:15px; cursor:pointer; width:26px; flex-shrink:0; }
+  .help-icon{ display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px;
+    border-radius:50%; background:var(--gray-200); color:var(--gray-500); font-size:10px; font-weight:700;
+    cursor:help; margin-left:6px; flex-shrink:0; vertical-align:middle; }
   .empty-note{ color:var(--gray-400); font-size:13px; font-style:italic; padding:6px 0; }
   .sp-row{ padding:9px 10px; margin:0 -10px; border-bottom:1px solid var(--gray-100); border-radius:8px;
     cursor:pointer; font-size:14.5px; font-weight:600; color:var(--gray-800); transition:all .12s ease;
@@ -243,6 +248,9 @@
   .compare-status-badge.gap{ background:var(--red-bg); color:var(--red); }
   .compare-status-badge.open{ background:var(--gray-100); color:var(--gray-700); }
   .compare-status-badge.new{ background:var(--violet-light); color:var(--violet-dark); }
+  .compare-legend{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--gray-500); margin:0 0 14px; padding-left:16px; }
+  .compare-legend-item{ display:flex; align-items:center; gap:6px; }
+  .compare-legend-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; display:inline-block; }
   .compare-build-columns{ display:grid; grid-template-columns:1fr 1fr 1.2fr; gap:16px; }
   .compare-target-dropzone{ min-height:60px; border:1.5px dashed var(--gray-400); border-radius:12px; padding:10px; }
   .compare-target-card{ background:#fff; border:1px solid var(--gray-200); border-radius:10px;
@@ -284,7 +292,6 @@ let state = {
   screen: 'loading',
   user: null,
   profile: null,
-  departments: [],
   companies: [],
   expandedCompanyId: null,
   showNewCompanyModal: false,
@@ -333,6 +340,10 @@ let state = {
 
 function escapeHtml(s){
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function helpIcon(text){
+  return `<span class="help-icon" title="${escapeHtml(text)}">?</span>`;
 }
 
 /* ================= ERROR NOTIFICATIONS (top-right, auto-dismiss) ================= */
@@ -466,7 +477,7 @@ async function doSignIn(email, password){
 }
 async function doSignOut(){
   await sb.auth.signOut();
-  state = { screen:'login', user:null, profile:null, departments:[],
+  state = { screen:'login', user:null, profile:null,
     companies:[], expandedCompanyId:null, showNewCompanyModal:false, newCompanyProcessNames:[], companySettingsFor:null,
     editorProcess:null, editorSiblingProcesses:[], editingMegaCycle:false, editorCanEdit:false,
     editorSelectedSpId:null,
@@ -503,18 +514,6 @@ async function doUpdatePassword(newPassword){
   render();
 }
 
-/* ================= DEPARTMENTS ================= */
-async function loadDepartments(){
-  const { data } = await sb.from('departments').select('*').order('name');
-  state.departments = data || [];
-}
-async function createDepartment(name){
-  if(!name.trim()) return;
-  const { error } = await sb.from('departments').insert({ name: name.trim() });
-  if(error){ showError(error.message); return; }
-  toast('Department created.');
-  await loadDepartments(); render();
-}
 /* ================= COMPANIES ================= */
 async function loadCompanies(){
   const { data, error } = await sb.from('companies')
@@ -675,9 +674,15 @@ function reportSaveResult(error, data){
     showError('Save did not apply — check permissions.');
   }
 }
+function wordCount(text){ return (text||'').trim().split(/\s+/).filter(Boolean).length; }
+function updateWordHint(hintId, text, threshold, message){
+  const el = document.getElementById(hintId);
+  if(el) el.textContent = wordCount(text) > threshold ? message : '';
+}
 function onSubName(spId, v){
   findSp(spId).name = v; updateEditorTree();
   refreshSaveButton('l2-save-btn', state.editorProcess.subprocesses.some(s=>s.name.trim()));
+  updateWordHint('sub-hint-'+spId, v, 4, 'Keep it short — aim for a noun phrase');
   debounced('sp-'+spId, async ()=>{
     const { data, error } = await sb.from('subprocesses').update({ name:v }).eq('id', spId).select();
     reportSaveResult(error, data);
@@ -686,6 +691,7 @@ function onSubName(spId, v){
 function onStepText(spId, stepId, v){
   findStep(spId, stepId).text = v; updateEditorTree();
   refreshSaveButton('l3-save-btn', findSp(spId).steps.some(s=>s.text.trim()));
+  updateWordHint('step-hint-'+stepId, v, 6, 'Keep it short — aim for a single activity');
   debounced('step-'+stepId, async ()=>{
     const { data, error } = await sb.from('steps').update({ text:v }).eq('id', stepId).select();
     reportSaveResult(error, data);
@@ -837,7 +843,7 @@ function sanitizeFilenamePart(s){
 }
 async function exportExcel(processIdOnly, companyIdOnly){
   let query = sb.from('processes').select(`
-      l1_name, companies(name), departments(name),
+      l1_name, companies(name),
       subprocesses ( name, position,
         steps ( text, position,
           tasks ( text, position,
@@ -860,7 +866,6 @@ async function exportExcel(processIdOnly, companyIdOnly){
         if(!st.text || !st.text.trim()) return;
         const base = {
           "Company": proc.companies ? proc.companies.name : '',
-          "Department": proc.departments ? proc.departments.name : '',
           "L1 Mega-cycle": proc.l1_name,
           "L2 Sub-process": sp.name,
           "L3 Process step": st.text
@@ -917,7 +922,6 @@ async function loadAdminData(){
   state.adminPending = pending || [];
   const { data: all } = await sb.from('profiles').select('*').neq('status','pending').order('full_name');
   state.adminUsers = all || [];
-  await loadDepartments();
 
   if(state.companies.length === 0) await loadCompanies();
 
@@ -2094,6 +2098,18 @@ function renderCompareTargetColumn(editable){
       <button class="btn btn-ghost" onclick="createBlankTargetItem()">Add</button>
     </div>` : ''}`;
 }
+function renderCompareLegend(){
+  const items = [
+    ['var(--green)', 'Merged'],
+    ['var(--amber)', 'Adopted'],
+    ['var(--violet)', 'New'],
+    ['var(--gray-500)', 'Open'],
+    ['var(--red)', 'Eliminated']
+  ];
+  return `<div class="compare-legend">${items.map(([color,label])=>
+    `<span class="compare-legend-item"><span class="compare-legend-dot" style="background:${color};"></span>${label}</span>`
+  ).join('')}</div>`;
+}
 function renderCompare(){
   const session = state.compareSession;
   if(!session) return `${renderHeader()}<div class="wrap"><div class="empty-note">No comparison session selected. <button class="link-btn" onclick="openComparePicker()">Start one</button></div></div>`;
@@ -2114,7 +2130,7 @@ function renderCompare(){
     <div class="wrap">
       ${headerBlock}
       <div class="card">
-        <div class="card-title" style="margin-bottom:4px;">Mega-cycles <span style="opacity:.5; font-weight:600;">(L1)</span></div>
+        <div class="card-title" style="margin-bottom:4px;">Mega-cycles <span style="opacity:.5; font-weight:600;">(L1)</span>${helpIcon('Mega-cycles are matched automatically by exact name between the two companies — anything left over shows below as unique to one side.')}</div>
         <div class="card-hint" style="margin-bottom:16px;">Matched pairs</div>
         ${renderCompareL1Matched(l1Matches)}
         <div class="subblock-title" style="margin:20px 0 10px;">Only in one company</div>
@@ -2127,6 +2143,12 @@ function renderCompare(){
   }
 
   const levelTitles = { l2:'Sub-processes', l3:'Process steps', l4:'Tasks', l5:'Work instructions' };
+  const levelHelp = {
+    l2: 'Drag matching sub-processes together to merge them, or drop one alone to adopt it, or add a brand-new one.',
+    l3: 'Drag matching process steps together to merge them, or drop one alone to adopt it, or add a brand-new one.',
+    l4: 'Drag matching tasks together to merge them, or drop one alone to adopt it, or add a brand-new one.',
+    l5: 'Drag matching work instructions together to merge them, or drop one alone to adopt it, or add a brand-new one.'
+  };
   const finished = !!state.compareBuildCompletion;
   const editable = isAdmin && !finished;
   const nextLevelForFinish = COMPARE_LEVELS[COMPARE_LEVELS.indexOf(level)+1];
@@ -2134,15 +2156,19 @@ function renderCompare(){
   return `${renderHeader()}
   <div class="wrap">
     ${headerBlock}
+    ${renderCompareLegend()}
     <div class="card">
-      <div class="card-title" style="margin-bottom:4px;">${levelTitles[level]} <span style="opacity:.5; font-weight:600;">(${level.toUpperCase()})</span></div>
+      <div class="card-title" style="margin-bottom:4px;">${levelTitles[level]} <span style="opacity:.5; font-weight:600;">(${level.toUpperCase()})</span>${helpIcon(levelHelp[level])}</div>
       <div class="card-hint" style="margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
         <span>${finished ? 'This layer is finished — reopen it to make changes.' : 'Drag items from either side onto the target column to build it.'}</span>
-        ${isAdmin ? (finished
-          ? `<button class="btn btn-ghost" onclick="reopenLevel()">Reopen this layer</button>`
-          : finishBlocker
-            ? `<button class="btn btn-primary" disabled title="Finish ${nextLevelForFinish.toUpperCase()} for &quot;${escapeHtml(finishBlocker.name || '(untitled)')}&quot; first">Finish this layer</button>`
-            : `<button class="btn btn-primary" onclick="finishLevel()">Finish this layer</button>`) : ''}
+        <div style="display:flex; align-items:center; gap:8px;">
+          <button class="btn btn-ghost" onclick="compareBreadcrumbTo(${state.comparePath.length-2})">‹ Back</button>
+          ${isAdmin ? (finished
+            ? `<button class="btn btn-ghost" onclick="reopenLevel()">Reopen this layer</button>`
+            : finishBlocker
+              ? `<button class="btn btn-primary" disabled title="Finish ${nextLevelForFinish.toUpperCase()} for &quot;${escapeHtml(finishBlocker.name || '(untitled)')}&quot; first">Finish this layer</button>`
+              : `<button class="btn btn-primary" onclick="finishLevel()">Finish this layer</button>`) : ''}
+        </div>
       </div>
       <div class="compare-build-columns">
         <div class="compare-col"><div class="compare-col-title">${escapeHtml(nameA)}</div>${renderCompareSourceColumn('a', editable)}</div>
@@ -2268,7 +2294,7 @@ function renderPending(){
   return `<div class="center-wrap"><div class="auth-card status-box">
     <div class="status-icon">⏳</div>
     <h2>Access requested</h2>
-    <p class="sub">An admin still needs to approve your access. You'll get access to your department once approved.</p>
+    <p class="sub">An admin still needs to approve your access. You'll get access once approved.</p>
     <button class="btn btn-ghost" onclick="doSignOut()">Log out</button>
   </div></div>`;
 }
@@ -2387,7 +2413,6 @@ function renderAdmin(){
         <div class="tab ${state.adminTab==='permissions'?'active':''}" onclick="setAdminTab('permissions')">Permissions</div>
         <div class="tab ${state.adminTab==='groups'?'active':''}" onclick="setAdminTab('groups')">Groups</div>
         <div class="tab ${state.adminTab==='audit'?'active':''}" onclick="setAdminTab('audit')">Audit Log</div>
-        <div class="tab ${state.adminTab==='depts'?'active':''}" onclick="setAdminTab('depts')">Departments</div>
         <div class="tab ${state.adminTab==='stats'?'active':''}" onclick="setAdminTab('stats')">Statistics</div>
       </div>
       ${state.adminTab==='pending' ? renderAdminPending() : ''}
@@ -2395,7 +2420,6 @@ function renderAdmin(){
       ${state.adminTab==='permissions' ? renderAdminPermissions() : ''}
       ${state.adminTab==='groups' ? renderAdminGroups() : ''}
       ${state.adminTab==='audit' ? renderAdminAuditLog() : ''}
-      ${state.adminTab==='depts' ? renderAdminDepts() : ''}
       ${state.adminTab==='stats' ? renderAdminStatistics() : ''}
     </div>
   </div>
@@ -2451,6 +2475,7 @@ function renderAdminUsers(){
 function renderAdminPermissions(){
   return `<div style="display:grid; grid-template-columns:300px 1fr; gap:24px; align-items:start;">
     <div>
+      <div class="subblock-title" style="margin-bottom:8px;">Companies &amp; mega-cycles${helpIcon('Click a company or mega-cycle, then grant access to a user or group on the right.')}</div>
       ${renderAccessTree()}
       <div style="margin-top:16px;">
         ${renderAccessNodeUsers()}
@@ -2609,16 +2634,6 @@ function renderAdminAuditLog(){
   `).join('')}
   </tbody></table>`;
 }
-function renderAdminDepts(){
-  return `<div class="inline-form">
-      <input type="text" id="new-dept-name" placeholder="New department, e.g. Finance">
-      <button class="btn btn-primary" onclick="createDepartment(document.getElementById('new-dept-name').value); document.getElementById('new-dept-name').value='';">Create</button>
-    </div>
-    <table class="admin-table"><thead><tr><th>Department</th></tr></thead><tbody>
-      ${state.departments.map(d=>`<tr><td>${escapeHtml(d.name)}</td></tr>`).join('')}
-    </tbody></table>`;
-}
-
 /* ---------- Statistics tab ---------- */
 function renderAdminStatistics(){
   if(state.adminStatsLoading && !state.adminCaptureStats){
@@ -2871,7 +2886,7 @@ function renderEditorLeftPanel(){
   let html = '';
 
   html += `<div class="card ${c2}">
-    <div class="card-head" style="${p.l2_locked?'opacity:.5;':''}"><div class="card-head-left"><span class="card-title">Sub-processes <span class="card-level-label">(L2)</span></span></div>
+    <div class="card-head" style="${p.l2_locked?'opacity:.5;':''}"><div class="card-head-left"><span class="card-title">Sub-processes <span class="card-level-label">(L2)</span></span>${helpIcon('One sub-process per line, kept to a short noun phrase — this becomes selectable to work on its steps in L3.')}</div>
     <span class="card-hint">short noun phrases</span></div>`;
   if(!p.l2_locked){
     if(p.subprocesses.length===0) html += `<div class="empty-note">No sub-processes yet.</div>`;
@@ -2882,7 +2897,8 @@ function renderEditorLeftPanel(){
         html += `<div class="row-input">
           <input type="text" placeholder="e.g. Order management" value="${escapeHtml(sp.name)}" oninput="onSubName('${sp.id}', this.value)">
           <button class="icon-btn" onclick="removeSubprocess('${sp.id}')">✕</button>
-        </div>`;
+        </div>
+        <div class="input-hint" id="sub-hint-${sp.id}">${wordCount(sp.name) > 4 ? 'Keep it short — aim for a noun phrase' : ''}</div>`;
       }
     });
     if(!readOnly) html += `<button class="link-btn" onclick="addSubprocess()">+ add sub-process</button>`;
@@ -2905,7 +2921,7 @@ function renderEditorLeftPanel(){
 
   /* ---------- L3: steps of the selected sub-process ---------- */
   html += `<div class="card ${c3}">
-    <div class="card-head" style="${(selSp&&selSp.l3_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="card-title">Process steps <span class="card-level-label">(L3)</span></span></div>
+    <div class="card-head" style="${(selSp&&selSp.l3_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="card-title">Process steps <span class="card-level-label">(L3)</span></span>${helpIcon('One process step per line, starting with a verb — this becomes selectable to work on its tasks in L4.')}</div>
     <span class="card-hint">verb first: "create...", "check..."</span></div>`;
   if(!p.l2_locked){ html += `<div class="empty-note">Save L2 first to add process steps.</div>`; }
   else if(p.subprocesses.length===0){ html += `<div class="empty-note">No sub-processes yet — add one in L2 above.</div>`; }
@@ -2921,7 +2937,8 @@ function renderEditorLeftPanel(){
           html += `<div class="row-input">
             <input type="text" placeholder="e.g. Create sales order" value="${escapeHtml(st.text)}" oninput="onStepText('${selSp.id}','${st.id}', this.value)">
             <button class="icon-btn" onclick="removeStep('${selSp.id}','${st.id}')">✕</button>
-          </div>`;
+          </div>
+          <div class="input-hint" id="step-hint-${st.id}">${wordCount(st.text) > 6 ? 'Keep it short — aim for a single activity' : ''}</div>`;
         }
       });
       if(!readOnly){
@@ -2945,7 +2962,7 @@ function renderEditorLeftPanel(){
 
   /* ---------- L4: tasks of the selected step ---------- */
   html += `<div class="card ${c4}">
-    <div class="card-head" style="${(selStep&&selStep.l4_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="card-title">Tasks <span class="card-level-label">(L4)</span></span></div>
+    <div class="card-head" style="${(selStep&&selStep.l4_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="card-title">Tasks <span class="card-level-label">(L4)</span></span>${helpIcon('One task per line, verb + object — this becomes selectable to work on its work instructions in L5.')}</div>
     <span class="card-hint">verb + object, e.g. "Enter customer ID"</span></div>`;
   if(!selSp || !selSp.l3_locked){ html += `<div class="empty-note">Save L3 for a sub-process first, then select a step.</div>`; }
   else if(!selStep){ html += `<div class="empty-note">Click a step in L3 above to work on its tasks here.</div>`; }
@@ -2984,7 +3001,7 @@ function renderEditorLeftPanel(){
 
   /* ---------- L5: work instructions of the selected task ---------- */
   html += `<div class="card ${c5}">
-    <div class="card-head" style="${(selTask&&selTask.l5_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="card-title">Work instructions <span class="card-level-label">(L5)</span></span></div>
+    <div class="card-head" style="${(selTask&&selTask.l5_locked)?'opacity:.5;':''}"><div class="card-head-left"><span class="card-title">Work instructions <span class="card-level-label">(L5)</span></span>${helpIcon('System-specific detail for this task: transaction codes, field names, key actions to perform.')}</div>
     <span class="card-hint">System-specific: transaction codes, field names, key actions.</span></div>`;
   if(!selStep || !selStep.l4_locked){
     html += `<div class="empty-note">Save L4 for a step first, then select a task.</div>`;
