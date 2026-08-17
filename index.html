@@ -243,11 +243,14 @@
   .compare-pair-missing{ font-style:italic; font-weight:500; color:var(--gray-500); }
   .compare-status-badge{ font-size:11.5px; font-weight:700; padding:4px 11px; border-radius:999px;
     border:none; white-space:nowrap; flex-shrink:0; }
-  .compare-status-badge.match{ background:var(--green-bg); color:var(--green); }
-  .compare-status-badge.partial{ background:var(--amber-bg); color:var(--amber); }
-  .compare-status-badge.gap{ background:var(--red-bg); color:var(--red); }
-  .compare-status-badge.open{ background:var(--gray-100); color:var(--gray-700); }
-  .compare-status-badge.new{ background:var(--violet-light); color:var(--violet-dark); }
+  /* Legend dots share these same rules (via the combined selectors below)
+     instead of hardcoding their own colors, so the legend can never drift
+     out of sync with the actual pill colors again. */
+  .compare-status-badge.match, .compare-legend-dot.match{ background:var(--green-bg); color:var(--green); }
+  .compare-status-badge.partial, .compare-legend-dot.partial{ background:var(--amber-bg); color:var(--amber); }
+  .compare-status-badge.gap, .compare-legend-dot.gap{ background:var(--red-bg); color:var(--red); }
+  .compare-status-badge.open, .compare-legend-dot.open{ background:var(--gray-100); color:var(--gray-700); }
+  .compare-status-badge.new, .compare-legend-dot.new{ background:var(--violet-light); color:var(--violet-dark); }
   .compare-legend{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--gray-500); margin:0 0 14px; padding-left:16px; }
   .compare-legend-item{ display:flex; align-items:center; gap:6px; }
   .compare-legend-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; display:inline-block; }
@@ -2099,15 +2102,18 @@ function renderCompareTargetColumn(editable){
     </div>` : ''}`;
 }
 function renderCompareLegend(){
+  // Same status classes deriveTargetItemStatus()/the real badges use
+  // (match/partial/new/open/gap) — the dot's color comes from the exact
+  // same .compare-status-badge.X CSS rule, not a separate value here.
   const items = [
-    ['var(--green)', 'Merged'],
-    ['var(--amber)', 'Adopted'],
-    ['var(--violet)', 'New'],
-    ['var(--gray-500)', 'Open'],
-    ['var(--red)', 'Eliminated']
+    ['match', 'Merged'],
+    ['partial', 'Adopted'],
+    ['new', 'New'],
+    ['open', 'Open'],
+    ['gap', 'Eliminated']
   ];
-  return `<div class="compare-legend">${items.map(([color,label])=>
-    `<span class="compare-legend-item"><span class="compare-legend-dot" style="background:${color};"></span>${label}</span>`
+  return `<div class="compare-legend">${items.map(([statusClass,label])=>
+    `<span class="compare-legend-item"><span class="compare-legend-dot ${statusClass}"></span>${label}</span>`
   ).join('')}</div>`;
 }
 function renderCompare(){
