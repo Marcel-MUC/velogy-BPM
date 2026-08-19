@@ -2240,11 +2240,16 @@ function updateTargetFlowLines(){
   // The diagram now scrolls (max-height + overflow-y), so the SVG must span
   // the full scrollable content height (grid.scrollHeight), not just the
   // clamped visible viewport, or lines below the fold would be clipped.
+  // Width comes from clientWidth (content box, excludes the vertical
+  // scrollbar's own width) rather than the bounding rect (border box,
+  // includes it) — sizing the SVG to the latter made it wider than the
+  // actual content area and forced an unwanted horizontal scrollbar.
+  const svgWidth = container.clientWidth;
   const svgHeight = grid.scrollHeight;
   if(svgHeight===0) return;
-  svg.style.width = containerRect.width + 'px';
+  svg.style.width = svgWidth + 'px';
   svg.style.height = svgHeight + 'px';
-  svg.setAttribute('viewBox', `0 0 ${containerRect.width} ${svgHeight}`);
+  svg.setAttribute('viewBox', `0 0 ${svgWidth} ${svgHeight}`);
   let lines = `<defs><marker id="tf-arrow" markerWidth="10" markerHeight="10" refX="7" refY="5" orient="auto" markerUnits="userSpaceOnUse">
     <path d="M0,0 L7,5 L0,10" style="fill:none; stroke:var(--violet); stroke-width:2px; stroke-linecap:round; stroke-linejoin:round;" />
   </marker></defs>`;
