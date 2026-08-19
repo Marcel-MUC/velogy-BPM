@@ -3244,13 +3244,14 @@ function updateEditorTree(){
   // A childless node renders as a plain, non-collapsible line — no chevron,
   // no summary, nothing to hide. A node WITH children is expanded either
   // because the admin manually toggled it open (state.editorTreeExpanded,
-  // persisted) or because `shouldExpand` says so. shouldExpand is a
-  // SEPARATE cascade from the highlight's `isOn` — a step that's merely
-  // the ANCESTOR of a deeper selection (e.g. the step containing the
-  // selected task) must stay expanded so that selection's own line is even
-  // visible, even though it isn't itself highlighted (no upward highlight
-  // bleed). Conflating the two used to collapse the parent step the
-  // instant a task inside it was selected.
+  // persisted) or because `shouldExpand` says so — which is true only when
+  // this exact node is the currently-selected one at its level (regardless
+  // of whether something deeper is ALSO selected, so the ancestor chain
+  // down to the current selection always stays visible). Selection never
+  // cascades further than that one level: picking a sub-process reveals
+  // its steps, but every step still starts collapsed until picked itself,
+  // and so on down to L4 — one level opens at a time, nothing opens two
+  // levels down in one jump.
   function collapsibleLine(level, id, isOn, shouldExpand, text, childCount, childWord){
     if(childCount===0){
       emitLine(level, isOn, escapeHtml(text));
@@ -3268,27 +3269,30 @@ function updateEditorTree(){
     const namedSubprocesses = p.subprocesses.filter(sp=>sp.name.trim());
     namedSubprocesses.forEach((sp, spIdx)=>{
       const spOn = highlightSpId === sp.id;
-      emitLine(2, spOn, escapeHtml(sp.name));
-      sp.steps.forEach(st=>{
-        if(!st.text.trim()) return;
-        const stepOn = spOn || highlightStepId === st.id;
-        const stepIsSelected = !!(selStep && selStep.id === st.id);
-        const stepShouldExpand = spOn || stepIsSelected;
-        const namedTasks = st.tasks.filter(t=>t.text.trim());
-        const stepExpanded = collapsibleLine(3, st.id, stepOn, stepShouldExpand, st.text, namedTasks.length, 'task');
-        if(!stepExpanded) return;
-        const stepCascadeAllTasks = spOn || (stepIsSelected && !selTask);
-        namedTasks.forEach(task=>{
-          const taskOn = stepOn || highlightTaskId === task.id;
-          const taskShouldExpand = stepCascadeAllTasks || (!!selTask && selTask.id === task.id);
-          const namedWIs = task.work_instructions.filter(w=>w.text.trim());
-          const taskExpanded = collapsibleLine(4, task.id, taskOn, taskShouldExpand, task.text, namedWIs.length, 'work instruction');
-          if(!taskExpanded) return;
-          namedWIs.forEach(wi=>{
-            emitLine(5, taskOn, escapeHtml(wi.text));
-          });
+      const spIsSelected = !!(selSp && selSp.id === sp.id);
+      const namedSteps = sp.steps.filter(st=>st.text.trim());
+      const spExpanded = collapsibleLine(2, sp.id, spOn, spIsSelected, sp.name, namedSteps.length, 'step');
+      if(spExpanded){
+        namedSteps.forEach(st=>{
+          const stepOn = spOn || highlightStepId === st.id;
+          const stepIsSelected = !!(selStep && selStep.id === st.id);
+          const namedTasks = st.tasks.filter(t=>t.text.trim());
+          const stepExpanded = collapsibleLine(3, st.id, stepOn, stepIsSelected, st.text, namedTasks.length, 'task');
+          if(stepExpanded){
+            namedTasks.forEach(task=>{
+              const taskOn = stepOn || highlightTaskId === task.id;
+              const taskIsSelected = !!(selTask && selTask.id === task.id);
+              const namedWIs = task.work_instructions.filter(w=>w.text.trim());
+              const taskExpanded = collapsibleLine(4, task.id, taskOn, taskIsSelected, task.text, namedWIs.length, 'work instruction');
+              if(taskExpanded){
+                namedWIs.forEach(wi=>{
+                  emitLine(5, taskOn, escapeHtml(wi.text));
+                });
+              }
+            });
+          }
         });
-      });
+      }
       closeGroup();
       if(spIdx < namedSubprocesses.length-1) h += `<div class="tree-l2-divider"></div>`;
     });
