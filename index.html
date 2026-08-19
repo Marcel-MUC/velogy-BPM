@@ -2245,7 +2245,7 @@ function renderComparePicker(){
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px; padding-left:16px;">
       <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Comparisons</div>
       <div class="actions">
-        ${isAdmin ? `<button class="btn btn-primary" onclick="openCompareCreateModal()" title="New comparison">+</button>` : ''}
+        ${isAdmin ? `<button class="btn btn-primary" onclick="openCompareCreateModal()">+ Add mapping</button>` : ''}
       </div>
     </div>
     ${state.compareSessions.length===0
