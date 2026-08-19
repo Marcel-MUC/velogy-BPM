@@ -1396,8 +1396,9 @@ function compareItemsForCompanyL1(companyId){
   items.sort((x,y)=>x.label.localeCompare(y.label));
   return items;
 }
-function computeCompareL1Matches(){
-  const itemsA = state.compareItemsA, itemsB = state.compareItemsB;
+function computeCompareL1Matches(itemsA, itemsB){
+  if(!itemsA) itemsA = state.compareItemsA;
+  if(!itemsB) itemsB = state.compareItemsB;
   const usedA = new Set(), usedB = new Set(), matched = [];
   itemsA.forEach(a=>{
     if(compareNormalize(a.label)==='') return;
@@ -1405,6 +1406,201 @@ function computeCompareL1Matches(){
     if(b){ usedA.add(a.id); usedB.add(b.id); matched.push({ a, b }); }
   });
   return { matched, usedA, usedB };
+}
+/* ---------- Process Mapping Excel export (client-side, respects RLS) ----------
+   Mirrors the Process Capture export's approach exactly (same SheetJS usage,
+   same formatExportTimestamp/sanitizeFilenamePart helpers, same "Nothing to
+   export yet" toast) — this is that same feature extended to Process
+   Mapping, not a separately-built one. scope is 'single' (the mega-cycle
+   currently open, from state.comparePath[0]) or 'all' (every mega-cycle in
+   this session, matched pairs then one-sided A then one-sided B, exactly the
+   order the L1 screen already lists them in). */
+async function exportMappingExcel(scope){
+  const session = state.compareSession;
+  if(!session) return;
+  const nameA = compareCompanyName(session.company_a_id);
+  const nameB = compareCompanyName(session.company_b_id);
+
+  let rootPairs;
+  if(scope === 'single'){
+    const root = state.comparePath[0];
+    if(!root) return;
+    const label = (root.itemA || root.itemB).label;
+    rootPairs = [{ l1AId: root.itemA ? root.itemA.id : null, l1BId: root.itemB ? root.itemB.id : null, label }];
+  } else {
+    const itemsA = compareItemsForCompanyL1(session.company_a_id);
+    const itemsB = compareItemsForCompanyL1(session.company_b_id);
+    const { matched, usedA, usedB } = computeCompareL1Matches(itemsA, itemsB);
+    rootPairs = [
+      ...matched.map(m=>({ l1AId:m.a.id, l1BId:m.b.id, label:m.a.label })),
+      ...itemsA.filter(a=>!usedA.has(a.id)).map(a=>({ l1AId:a.id, l1BId:null, label:a.label })),
+      ...itemsB.filter(b=>!usedB.has(b.id)).map(b=>({ l1AId:null, l1BId:b.id, label:b.label }))
+    ];
+  }
+  if(rootPairs.length===0){ toast('Nothing to export yet — add some content first.'); return; }
+
+  const fetchTree = async (companyId) => {
+    const { data, error } = await sb.from('processes').select(`
+      id, l1_name,
+      subprocesses ( id, name, position,
+        steps ( id, text, position,
+          tasks ( id, text, position,
+            work_instructions ( id, text, position )
+          )
+        )
+      )
+    `).eq('company_id', companyId);
+    if(error){ showError(error.message); return null; }
+    return data || [];
+  };
+  const [treeA, treeB, targetRes, compRes] = await Promise.all([
+    fetchTree(session.company_a_id),
+    fetchTree(session.company_b_id),
+    sb.from('target_items').select('*').eq('session_id', session.id),
+    sb.from('build_completions').select('*').eq('session_id', session.id)
+  ]);
+  if(treeA===null || treeB===null) return;
+  if(targetRes.error){ showError(targetRes.error.message); return; }
+  if(compRes.error){ showError(compRes.error.message); return; }
+  const targets = targetRes.data || [];
+  const comps = compRes.data || [];
+
+  // Per company: info(id) -> that item's own name plus its full ancestor
+  // path (blank past its own level); children[level](parentId) -> child ids
+  // one level down, used to find source items never linked to any target
+  // ("eliminated") in a finished scope.
+  function indexTree(processes){
+    const info = new Map();
+    const children = { l2:new Map(), l3:new Map(), l4:new Map(), l5:new Map() };
+    processes.forEach(proc=>{
+      const subs = (proc.subprocesses||[]).slice().sort((a,b)=>a.position-b.position);
+      children.l2.set(proc.id, subs.map(s=>s.id));
+      subs.forEach(sp=>{
+        info.set(sp.id, { name:sp.name||'(untitled)', l1:proc.l1_name, l2:sp.name, l3:'', l4:'', l5:'' });
+        const steps = (sp.steps||[]).slice().sort((a,b)=>a.position-b.position);
+        children.l3.set(sp.id, steps.map(s=>s.id));
+        steps.forEach(st=>{
+          info.set(st.id, { name:st.text||'(untitled)', l1:proc.l1_name, l2:sp.name, l3:st.text, l4:'', l5:'' });
+          const tasks = (st.tasks||[]).slice().sort((a,b)=>a.position-b.position);
+          children.l4.set(st.id, tasks.map(t=>t.id));
+          tasks.forEach(task=>{
+            info.set(task.id, { name:task.text||'(untitled)', l1:proc.l1_name, l2:sp.name, l3:st.text, l4:task.text, l5:'' });
+            const wis = (task.work_instructions||[]).slice().sort((a,b)=>a.position-b.position);
+            children.l5.set(task.id, wis.map(w=>w.id));
+            wis.forEach(wi=>{
+              info.set(wi.id, { name:wi.text||'(untitled)', l1:proc.l1_name, l2:sp.name, l3:st.text, l4:task.text, l5:wi.text });
+            });
+          });
+        });
+      });
+    });
+    return { info, children };
+  }
+  const sourceA = indexTree(treeA);
+  const sourceB = indexTree(treeB);
+
+  // Same ordering the build tool itself uses (position within each
+  // (level, parent) scope) — not a fresh sort.
+  const childTargetsByParent = new Map();
+  const rootTargetsByKey = new Map();
+  targets.forEach(t=>{
+    if(t.parent_target_item_id){
+      if(!childTargetsByParent.has(t.parent_target_item_id)) childTargetsByParent.set(t.parent_target_item_id, []);
+      childTargetsByParent.get(t.parent_target_item_id).push(t);
+    } else {
+      const key = `${t.l1_process_a_id||''}|${t.l1_process_b_id||''}`;
+      if(!rootTargetsByKey.has(key)) rootTargetsByKey.set(key, []);
+      rootTargetsByKey.get(key).push(t);
+    }
+  });
+  childTargetsByParent.forEach(list=>list.sort((a,b)=>a.position-b.position));
+  rootTargetsByKey.forEach(list=>list.sort((a,b)=>a.position-b.position));
+
+  const compKeySet = new Set(comps.map(c=>
+    `${c.level}|${c.parent_target_item_id||''}|${c.l1_process_a_id||''}|${c.l1_process_b_id||''}`
+  ));
+
+  const NEXT_LEVEL = { l2:'l3', l3:'l4', l4:'l5', l5:null };
+  const rows = [];
+
+  // Walks one (level, parent) scope: emits a row for every target_item here
+  // that has no deeper target_item children (a "leaf", wherever its branch
+  // actually stops), recurses into any that do, and — independently of
+  // whether this scope has any target_items at all — if it's been marked
+  // finished, adds an "Eliminated" row for every source item on either side
+  // that was never linked to a target_item here. A scope can be both: some
+  // items merged/adopted AND some eliminated in the same finished pass.
+  function walk(level, parentTargetItemId, l1AId, l1BId, parentAId, parentBId, l1Name, path){
+    const list = parentTargetItemId
+      ? (childTargetsByParent.get(parentTargetItemId) || [])
+      : (rootTargetsByKey.get(`${l1AId||''}|${l1BId||''}`) || []);
+
+    list.forEach(t=>{
+      const newPath = {...path, [level]: t.name || '(untitled)'};
+      const kids = childTargetsByParent.get(t.id) || [];
+      if(kids.length === 0){
+        const { statusLabel } = deriveTargetItemStatus(t, nameA, nameB);
+        rows.push({
+          "Mega-Cycle (L1)": l1Name,
+          "L2": newPath.l2||'', "L3": newPath.l3||'', "L4": newPath.l4||'', "L5": newPath.l5||'',
+          "Status": statusLabel,
+          [`${nameA} source`]: t.source_item_a_id ? ((sourceA.info.get(t.source_item_a_id)||{}).name||'') : '',
+          [`${nameB} source`]: t.source_item_b_id ? ((sourceB.info.get(t.source_item_b_id)||{}).name||'') : ''
+        });
+      }
+      const nextLevel = NEXT_LEVEL[level];
+      if(nextLevel) walk(nextLevel, t.id, null, null, t.source_item_a_id, t.source_item_b_id, l1Name, newPath);
+    });
+
+    const compKey = parentTargetItemId
+      ? `${level}|${parentTargetItemId}||`
+      : `${level}||${l1AId||''}|${l1BId||''}`;
+    if(compKeySet.has(compKey)){
+      const attachedA = new Set(list.map(t=>t.source_item_a_id).filter(Boolean));
+      const attachedB = new Set(list.map(t=>t.source_item_b_id).filter(Boolean));
+      const candA = parentAId ? (sourceA.children[level].get(parentAId) || []) : [];
+      const candB = parentBId ? (sourceB.children[level].get(parentBId) || []) : [];
+      candA.filter(id=>!attachedA.has(id)).forEach(id=>{
+        const info = sourceA.info.get(id);
+        if(!info) return;
+        rows.push({
+          "Mega-Cycle (L1)": info.l1, "L2": info.l2||'', "L3": info.l3||'', "L4": info.l4||'', "L5": info.l5||'',
+          "Status": "Eliminated", [`${nameA} source`]: info.name, [`${nameB} source`]: ''
+        });
+      });
+      candB.filter(id=>!attachedB.has(id)).forEach(id=>{
+        const info = sourceB.info.get(id);
+        if(!info) return;
+        rows.push({
+          "Mega-Cycle (L1)": info.l1, "L2": info.l2||'', "L3": info.l3||'', "L4": info.l4||'', "L5": info.l5||'',
+          "Status": "Eliminated", [`${nameA} source`]: '', [`${nameB} source`]: info.name
+        });
+      });
+    }
+  }
+
+  rootPairs.forEach(root=>{
+    walk('l2', null, root.l1AId, root.l1BId, root.l1AId, root.l1BId, root.label, {});
+  });
+
+  if(rows.length===0){
+    toast('Nothing to export yet — add some content first.');
+    return;
+  }
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{wch:20},{wch:20},{wch:20},{wch:20},{wch:20},{wch:22},{wch:26},{wch:26}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Target Process Map");
+
+  const ts = formatExportTimestamp(new Date());
+  const compA = sanitizeFilenamePart(nameA), compB = sanitizeFilenamePart(nameB);
+  const filename = scope === 'single'
+    ? `Export_Mapping_${compA}_${compB}_${sanitizeFilenamePart(rootPairs[0].label)}_${ts}.xlsx`
+    : `Export_Mapping_${compA}_${compB}_All_${ts}.xlsx`;
+
+  XLSX.writeFile(wb, filename);
+  toast('Exported.');
 }
 async function fetchCompareItems(level, parentId){
   if(!parentId) return [];
@@ -2293,7 +2489,12 @@ function renderCompare(){
   const headerBlock = `
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:12px; padding-left:16px;">
       <div style="font-weight:800; font-size:22px; color:var(--gray-900); letter-spacing:-.01em;">Compare: ${escapeHtml(nameA)} ↔ ${escapeHtml(nameB)}</div>
-      <button class="btn btn-ghost" style="width:120px; height:40px; display:inline-flex; align-items:center; justify-content:center;" onclick="openComparePicker()">Home</button>
+      <div class="actions">
+        ${level==='l1'
+          ? `<button class="btn btn-ghost" onclick="exportMappingExcel('all')">⭳ Export all</button>`
+          : `<button class="btn btn-ghost" onclick="exportMappingExcel('single')">⭳ Export</button>`}
+        <button class="btn btn-ghost" style="width:120px; height:40px; display:inline-flex; align-items:center; justify-content:center;" onclick="openComparePicker()">Home</button>
+      </div>
     </div>
     <div class="compare-breadcrumb-bar">${renderCompareBreadcrumb()}</div>`;
 
