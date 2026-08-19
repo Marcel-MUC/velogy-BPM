@@ -306,8 +306,8 @@
      the connector lines are an SVG overlay whose coordinates are measured
      from those boxes' actual rendered positions (updateTargetFlowLines),
      recomputed on render and on window resize. */
-  .tf-diagram{ position:relative; margin-top:6px; }
-  .tf-svg{ position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
+  .tf-diagram{ position:relative; margin-top:6px; max-height:420px; overflow-y:auto; }
+  .tf-svg{ position:absolute; top:0; left:0; pointer-events:none; }
   .tf-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; column-gap:16px; row-gap:24px; position:relative; z-index:1; }
   .tf-box-side{ color:var(--gray-500); background:var(--gray-50); }
 </style>
@@ -2232,10 +2232,19 @@ function updateTargetFlowLines(){
   const container = document.getElementById('tf-diagram');
   const svg = document.getElementById('tf-svg');
   if(!container || !svg) return;
+  const grid = container.querySelector('.tf-grid');
+  if(!grid) return;
   const items = state.compareTargetItems || [];
   const containerRect = container.getBoundingClientRect();
-  if(containerRect.width===0 || containerRect.height===0) return;
-  svg.setAttribute('viewBox', `0 0 ${containerRect.width} ${containerRect.height}`);
+  if(containerRect.width===0) return;
+  // The diagram now scrolls (max-height + overflow-y), so the SVG must span
+  // the full scrollable content height (grid.scrollHeight), not just the
+  // clamped visible viewport, or lines below the fold would be clipped.
+  const svgHeight = grid.scrollHeight;
+  if(svgHeight===0) return;
+  svg.style.width = containerRect.width + 'px';
+  svg.style.height = svgHeight + 'px';
+  svg.setAttribute('viewBox', `0 0 ${containerRect.width} ${svgHeight}`);
   let lines = `<defs><marker id="tf-arrow" markerWidth="10" markerHeight="10" refX="7" refY="5" orient="auto" markerUnits="userSpaceOnUse">
     <path d="M0,0 L7,5 L0,10" style="fill:none; stroke:var(--violet); stroke-width:2px; stroke-linecap:round; stroke-linejoin:round;" />
   </marker></defs>`;
