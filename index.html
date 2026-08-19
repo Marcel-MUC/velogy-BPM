@@ -42,6 +42,13 @@
     font-size:13.5px; font-weight:600; line-height:1.2; cursor:pointer;
     border:1px solid transparent; transition:all .12s ease; white-space:nowrap; }
   .btn:disabled{ opacity:.5; cursor:not-allowed; }
+  /* A glyph like "‹" mixed inline with plain text can sit at a different
+     baseline than the surrounding Latin letters (font-metric quirk), which
+     the button's own flex-centering can't fix since it treats "‹ Back" as
+     one combined run. Wrapping it in its own span makes it a separate flex
+     item, so the button's align-items:center centers it independently and
+     the mismatch cancels out. */
+  .btn-arrow{ display:inline-flex; align-items:center; line-height:1; }
   .btn-ghost{ background:#fff; border-color:var(--gray-200); color:var(--gray-700); }
   .btn-ghost:hover:not(:disabled){ background:var(--gray-100); }
   .btn-primary{ background:var(--violet); color:#fff; }
@@ -2200,7 +2207,7 @@ function renderCompare(){
       <div class="card-hint" style="margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
         <span>${finished ? 'This layer is finished — reopen it to make changes.' : 'Drag items from either side onto the target column to build it.'}</span>
         <div style="display:flex; align-items:center; gap:8px;">
-          <button class="btn btn-ghost" onclick="compareBreadcrumbTo(${state.comparePath.length-2})">‹ Back</button>
+          <button class="btn btn-ghost" onclick="compareBreadcrumbTo(${state.comparePath.length-2})"><span class="btn-arrow">‹</span> Back</button>
           ${isAdmin ? (finished
             ? `<button class="btn btn-ghost" onclick="reopenLevel()">Reopen this layer</button>`
             : finishBlocker
