@@ -2209,6 +2209,12 @@ function compareBreadcrumbTo(index){
   loadCompareLevel();
 }
 
+function exportMappingSessionAll(sessionId){
+  const session = state.compareSessions.find(x=>x.id===sessionId);
+  if(!session) return;
+  state.compareSession = session;
+  exportMappingExcel('all');
+}
 function renderCompareSessionsList(){
   return state.compareSessions.map(s=>{
     const nameA = compareCompanyName(s.company_a_id);
@@ -2217,7 +2223,10 @@ function renderCompareSessionsList(){
     return `<div class="dash-item" style="flex-direction:column; align-items:stretch; cursor:pointer;" onclick="toggleCompareSessionExpand('${s.id}')">
       <div style="display:flex; justify-content:space-between; align-items:center; width:100%; gap:10px; flex-wrap:wrap;">
         <h3 style="margin:0;">${escapeHtml(nameA)} ↔ ${escapeHtml(nameB)}</h3>
-        <span style="font-size:12px; color:var(--gray-500); flex-shrink:0;">${s.itemCount} item${s.itemCount===1?'':'s'} built · ${escapeHtml(new Date(s.created_at).toLocaleDateString())}</span>
+        <div style="display:flex; align-items:center; gap:12px;" onclick="event.stopPropagation()">
+          <span style="font-size:12px; color:var(--gray-500); flex-shrink:0;">${s.itemCount} item${s.itemCount===1?'':'s'} built · ${escapeHtml(new Date(s.created_at).toLocaleDateString())}</span>
+          <button class="btn btn-ghost" onclick="exportMappingSessionAll('${s.id}')">⭳ Export all</button>
+        </div>
       </div>
       ${isExp ? `<div onclick="event.stopPropagation()">${renderCompareL1Inline()}</div>` : ''}
     </div>`;
