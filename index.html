@@ -351,6 +351,7 @@ let state = {
   comparePickerCompanyB: '',
   showCompareCreateModal: false,
   compareSessions: [],
+  expandedCompareSessionId: null,
   compareSession: null,
   comparePath: [],
   compareItemsA: [],
@@ -523,7 +524,7 @@ async function doSignOut(){
     adminGroups:[], adminGroupMembers:[], groupMembersModalFor:null,
     adminStatsLoading:false, adminCaptureStats:null, adminMappingStats:null,
     accessTreeExpanded:{}, accessTreeSelected:null, addAccessLevel:'view', addAccessGrantee:'', addAccessGranteeText:'',
-    comparePickerCompanyA:'', comparePickerCompanyB:'', showCompareCreateModal:false, compareSessions:[], compareSession:null, comparePath:[], compareItemsA:[], compareItemsB:[],
+    comparePickerCompanyA:'', comparePickerCompanyB:'', showCompareCreateModal:false, compareSessions:[], expandedCompareSessionId:null, compareSession:null, comparePath:[], compareItemsA:[], compareItemsB:[],
     compareTargetItems:[], compareBuildCompletion:null,
     compareSourceChildrenA:new Set(), compareSourceChildrenB:new Set(), compareTargetChildParents:new Set(), compareChildCompletions:new Set(),
     authError:'' };
@@ -1430,13 +1431,23 @@ function closeCompareCreateModal(){
   state.showCompareCreateModal = false;
   render();
 }
-function openExistingCompareSession(sessionId){
+function toggleCompareSessionExpand(sessionId){
+  // Expands the L1 matched-pairs view in place, right under the row on the
+  // Comparisons list — the row itself keeps its compact size, it just gains
+  // the L1 content below it, rather than navigating to a whole new screen.
+  // Drilling into an actual L2+ build (drillIntoCompareL1) still switches to
+  // the full 'compare' screen, since the build tool needs the real estate.
+  if(state.expandedCompareSessionId === sessionId){
+    state.expandedCompareSessionId = null;
+    render();
+    return;
+  }
   const session = state.compareSessions.find(s=>s.id===sessionId);
   if(!session) return;
   state.compareSession = session;
   state.comparePath = [];
   resetDrillUiState();
-  state.screen = 'compare';
+  state.expandedCompareSessionId = sessionId;
   render();
   loadCompareLevel();
 }
@@ -1964,6 +1975,10 @@ function drillIntoCompareL1(processAId, processBId){
     itemB: processBId ? { id: processBId, label: compareItemLabel('b', processBId) } : null
   });
   resetDrillUiState();
+  // Actually building L2+ needs the full build tool, so this always jumps
+  // to the 'compare' screen — even when called from the inline L1 preview
+  // on the Comparisons list, which otherwise stays on 'compare-picker'.
+  state.screen = 'compare';
   render();
   loadCompareLevel();
 }
@@ -1988,11 +2003,30 @@ function renderCompareSessionsList(){
   return state.compareSessions.map(s=>{
     const nameA = compareCompanyName(s.company_a_id);
     const nameB = compareCompanyName(s.company_b_id);
-    return `<div class="dash-item" style="cursor:pointer;" onclick="openExistingCompareSession('${s.id}')">
-      <h3 style="margin:0;">${escapeHtml(nameA)} ↔ ${escapeHtml(nameB)}</h3>
-      <span style="font-size:12px; color:var(--gray-500); flex-shrink:0;">${s.itemCount} item${s.itemCount===1?'':'s'} built · ${escapeHtml(new Date(s.created_at).toLocaleDateString())}</span>
+    const isExp = state.expandedCompareSessionId === s.id;
+    return `<div class="dash-item" style="flex-direction:column; align-items:stretch; cursor:pointer;" onclick="toggleCompareSessionExpand('${s.id}')">
+      <div style="display:flex; justify-content:space-between; align-items:center; width:100%; gap:10px; flex-wrap:wrap;">
+        <h3 style="margin:0;">${escapeHtml(nameA)} ↔ ${escapeHtml(nameB)}</h3>
+        <span style="font-size:12px; color:var(--gray-500); flex-shrink:0;">${s.itemCount} item${s.itemCount===1?'':'s'} built · ${escapeHtml(new Date(s.created_at).toLocaleDateString())}</span>
+      </div>
+      ${isExp ? `<div onclick="event.stopPropagation()">${renderCompareL1Inline()}</div>` : ''}
     </div>`;
   }).join('');
+}
+function renderCompareL1Inline(){
+  if(!state.compareSession) return '';
+  const nameA = compareCompanyName(state.compareSession.company_a_id);
+  const nameB = compareCompanyName(state.compareSession.company_b_id);
+  const l1Matches = computeCompareL1Matches();
+  return `<div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--gray-100);">
+    <div class="card-hint" style="margin-bottom:12px;">Matched pairs</div>
+    ${renderCompareL1Matched(l1Matches)}
+    <div class="subblock-title" style="margin:20px 0 10px;">Only in one company</div>
+    <div class="compare-columns">
+      <div class="compare-col"><div class="compare-col-title">${escapeHtml(nameA)}</div>${renderCompareL1OnlyColumn('a', l1Matches)}</div>
+      <div class="compare-col"><div class="compare-col-title">${escapeHtml(nameB)}</div>${renderCompareL1OnlyColumn('b', l1Matches)}</div>
+    </div>
+  </div>`;
 }
 function renderComparePicker(){
   const isAdmin = state.profile.role==='admin';
