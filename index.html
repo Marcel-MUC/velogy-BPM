@@ -277,7 +277,7 @@
   .compare-legend{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--gray-500); margin:0 0 14px; padding-left:16px; }
   .compare-legend-item{ display:flex; align-items:center; gap:6px; }
   .compare-legend-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; display:inline-block; }
-  .compare-build-columns{ display:grid; grid-template-columns:1fr 1fr 1.2fr; gap:16px; }
+  .compare-build-columns{ display:grid; grid-template-columns:1fr 1.2fr 1fr; gap:16px; }
   .compare-target-dropzone{ min-height:60px; border:1.5px dashed var(--gray-400); border-radius:12px; padding:10px; }
   .compare-target-card{ background:#fff; border:1px solid var(--gray-200); border-radius:10px;
     padding:10px 12px; margin-bottom:8px; transition:background-color .12s ease, border-color .12s ease;
@@ -309,6 +309,7 @@
   .tf-diagram{ position:relative; margin-top:6px; }
   .tf-svg{ position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
   .tf-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; column-gap:56px; row-gap:24px; position:relative; z-index:1; }
+  .tf-box-side{ color:var(--gray-500); background:var(--gray-50); }
 </style>
 </head>
 <body>
@@ -2216,9 +2217,9 @@ function renderTargetFlowSection(){
     // without this a short source box would sit pinned to the row's top
     // instead of level with the target box its dotted line connects to.
     cells += `
-    <div style="grid-column:1; grid-row:${gr}; display:flex; align-items:center;">${r.srcA ? `<div class="compare-item-row static" style="cursor:default; width:100%;" data-tf-id="a-${r.target.id}">${escapeHtml(r.srcA.label || '(untitled)')}</div>` : ''}</div>
+    <div style="grid-column:1; grid-row:${gr}; display:flex; align-items:center;">${r.srcA ? `<div class="compare-item-row static tf-box-side" style="cursor:default; width:100%;" data-tf-id="a-${r.target.id}">${escapeHtml(r.srcA.label || '(untitled)')}</div>` : ''}</div>
     <div style="grid-column:2; grid-row:${gr}; display:flex; align-items:center;"><div class="compare-target-card" style="cursor:default; margin-bottom:0; width:100%;" data-tf-id="t-${r.target.id}">${escapeHtml(r.target.name || '(untitled)')}</div></div>
-    <div style="grid-column:3; grid-row:${gr}; display:flex; align-items:center;">${r.srcB ? `<div class="compare-item-row static" style="cursor:default; width:100%;" data-tf-id="b-${r.target.id}">${escapeHtml(r.srcB.label || '(untitled)')}</div>` : ''}</div>`;
+    <div style="grid-column:3; grid-row:${gr}; display:flex; align-items:center;">${r.srcB ? `<div class="compare-item-row static tf-box-side" style="cursor:default; width:100%;" data-tf-id="b-${r.target.id}">${escapeHtml(r.srcB.label || '(untitled)')}</div>` : ''}</div>`;
   });
   return `<div class="hairline"></div>
     <div class="subblock-title" style="margin-bottom:12px;">Target Process Flow</div>
@@ -2235,8 +2236,9 @@ function updateTargetFlowLines(){
   const containerRect = container.getBoundingClientRect();
   if(containerRect.width===0 || containerRect.height===0) return;
   svg.setAttribute('viewBox', `0 0 ${containerRect.width} ${containerRect.height}`);
-  let lines = `<defs><marker id="tf-arrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
-    <path d="M0,0 L8,4 L0,8 Z" style="fill:var(--violet);" /></marker></defs>`;
+  let lines = `<defs><marker id="tf-arrow" markerWidth="10" markerHeight="10" refX="7" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+    <path d="M0,0 L7,5 L0,10" style="fill:none; stroke:var(--violet); stroke-width:2px; stroke-linecap:round; stroke-linejoin:round;" />
+  </marker></defs>`;
   const centers = [];
   items.forEach(t=>{
     const tEl = container.querySelector(`[data-tf-id="t-${t.id}"]`);
@@ -2260,7 +2262,7 @@ function updateTargetFlowLines(){
   });
   for(let i=0; i<centers.length-1; i++){
     const cur = centers[i], next = centers[i+1];
-    lines += `<line x1="${cur.x}" y1="${cur.bottom}" x2="${next.x}" y2="${next.top-6}" style="stroke:var(--violet); stroke-width:2px;" marker-end="url(#tf-arrow)" />`;
+    lines += `<line x1="${cur.x}" y1="${cur.bottom}" x2="${next.x}" y2="${next.top-8}" style="stroke:var(--violet); stroke-width:2px; stroke-linecap:round;" marker-end="url(#tf-arrow)" />`;
   }
   svg.innerHTML = lines;
 }
@@ -2327,8 +2329,8 @@ function renderCompare(){
       </div>
       <div class="compare-build-columns">
         <div class="compare-col"><div class="compare-col-title">${escapeHtml(nameA)}</div>${renderCompareSourceColumn('a', editable)}</div>
-        <div class="compare-col"><div class="compare-col-title">${escapeHtml(nameB)}</div>${renderCompareSourceColumn('b', editable)}</div>
         <div class="compare-col compare-col-target"><div class="compare-col-title">Target</div>${renderCompareTargetColumn(editable)}</div>
+        <div class="compare-col"><div class="compare-col-title">${escapeHtml(nameB)}</div>${renderCompareSourceColumn('b', editable)}</div>
       </div>
       ${renderTargetFlowSection()}
     </div>
