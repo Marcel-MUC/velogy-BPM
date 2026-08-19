@@ -298,6 +298,17 @@
   .compare-target-dropzone{ max-height:420px; overflow-y:auto; }
   .drag-placeholder{ height:38px; border:1.5px dashed var(--violet); border-radius:8px;
     background:var(--violet-light); margin-bottom:6px; opacity:.7; flex-shrink:0; }
+  .hairline{ height:1px; background:var(--gray-200); margin:16px 0; }
+  /* Purely derived read-only mirror of the target column above — no drag,
+     no click handlers. Boxes share a CSS grid so a target's row and its
+     linked source boxes (if any) always land in the same grid row and thus
+     the same vertical position, regardless of text-wrapping differences;
+     the connector lines are an SVG overlay whose coordinates are measured
+     from those boxes' actual rendered positions (updateTargetFlowLines),
+     recomputed on render and on window resize. */
+  .tf-diagram{ position:relative; margin-top:6px; }
+  .tf-svg{ position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
+  .tf-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; column-gap:56px; row-gap:24px; position:relative; z-index:1; }
 </style>
 </head>
 <body>
@@ -1924,6 +1935,8 @@ function onTargetItemNameInput(targetItemId, v){
   if(state.compareBuildCompletion) return;
   const item = state.compareTargetItems.find(t=>t.id===targetItemId);
   if(item) item.name = v;
+  const tfEl = document.querySelector(`[data-tf-id="t-${targetItemId}"]`);
+  if(tfEl) tfEl.textContent = v || '(untitled)';
   debounced('target-item-'+targetItemId, async ()=>{
     const { data, error } = await sb.from('target_items').update({ name:v }).eq('id', targetItemId).select();
     reportSaveResult(error, data);
@@ -2182,6 +2195,76 @@ function renderCompareLegend(){
     `<span class="compare-legend-item"><span class="compare-legend-dot ${statusClass}"></span>${label}</span>`
   ).join('')}</div>`;
 }
+function renderTargetFlowSection(){
+  const items = state.compareTargetItems;
+  if(!state.compareSession || !items || items.length===0) return '';
+  const nameA = compareCompanyName(state.compareSession.company_a_id);
+  const nameB = compareCompanyName(state.compareSession.company_b_id);
+  const rows = items.map(t=>({
+    target: t,
+    srcA: t.source_item_a_id ? state.compareItemsA.find(i=>i.id===t.source_item_a_id) : null,
+    srcB: t.source_item_b_id ? state.compareItemsB.find(i=>i.id===t.source_item_b_id) : null
+  }));
+  let cells = `
+    <div class="compare-col-title" style="grid-column:1; grid-row:1;">${escapeHtml(nameA)}</div>
+    <div class="compare-col-title" style="grid-column:2; grid-row:1;">Target Process</div>
+    <div class="compare-col-title" style="grid-column:3; grid-row:1;">${escapeHtml(nameB)}</div>`;
+  rows.forEach((r, i)=>{
+    const gr = i + 2;
+    // Each grid cell centers its box vertically within the row's height —
+    // rows can be taller than one box (e.g. a wrapped target name), so
+    // without this a short source box would sit pinned to the row's top
+    // instead of level with the target box its dotted line connects to.
+    cells += `
+    <div style="grid-column:1; grid-row:${gr}; display:flex; align-items:center;">${r.srcA ? `<div class="compare-item-row static" style="cursor:default; width:100%;" data-tf-id="a-${r.target.id}">${escapeHtml(r.srcA.label || '(untitled)')}</div>` : ''}</div>
+    <div style="grid-column:2; grid-row:${gr}; display:flex; align-items:center;"><div class="compare-target-card" style="cursor:default; margin-bottom:0; width:100%;" data-tf-id="t-${r.target.id}">${escapeHtml(r.target.name || '(untitled)')}</div></div>
+    <div style="grid-column:3; grid-row:${gr}; display:flex; align-items:center;">${r.srcB ? `<div class="compare-item-row static" style="cursor:default; width:100%;" data-tf-id="b-${r.target.id}">${escapeHtml(r.srcB.label || '(untitled)')}</div>` : ''}</div>`;
+  });
+  return `<div class="hairline"></div>
+    <div class="subblock-title" style="margin-bottom:12px;">Target Process Flow</div>
+    <div class="tf-diagram" id="tf-diagram">
+      <svg class="tf-svg" id="tf-svg"></svg>
+      <div class="tf-grid">${cells}</div>
+    </div>`;
+}
+function updateTargetFlowLines(){
+  const container = document.getElementById('tf-diagram');
+  const svg = document.getElementById('tf-svg');
+  if(!container || !svg) return;
+  const items = state.compareTargetItems || [];
+  const containerRect = container.getBoundingClientRect();
+  if(containerRect.width===0 || containerRect.height===0) return;
+  svg.setAttribute('viewBox', `0 0 ${containerRect.width} ${containerRect.height}`);
+  let lines = `<defs><marker id="tf-arrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+    <path d="M0,0 L8,4 L0,8 Z" style="fill:var(--violet);" /></marker></defs>`;
+  const centers = [];
+  items.forEach(t=>{
+    const tEl = container.querySelector(`[data-tf-id="t-${t.id}"]`);
+    if(!tEl) return;
+    const r = tEl.getBoundingClientRect();
+    const left = r.left - containerRect.left, right = r.right - containerRect.left;
+    const cy = r.top - containerRect.top + r.height/2;
+    centers.push({ top: r.top-containerRect.top, bottom: r.bottom-containerRect.top, x: (left+right)/2 });
+    const aEl = container.querySelector(`[data-tf-id="a-${t.id}"]`);
+    if(aEl){
+      const ar = aEl.getBoundingClientRect();
+      const ax = ar.right - containerRect.left;
+      lines += `<line x1="${ax}" y1="${cy}" x2="${left}" y2="${cy}" style="stroke:var(--gray-400); stroke-width:1.5px; stroke-dasharray:4 3;" />`;
+    }
+    const bEl = container.querySelector(`[data-tf-id="b-${t.id}"]`);
+    if(bEl){
+      const br = bEl.getBoundingClientRect();
+      const bx = br.left - containerRect.left;
+      lines += `<line x1="${right}" y1="${cy}" x2="${bx}" y2="${cy}" style="stroke:var(--gray-400); stroke-width:1.5px; stroke-dasharray:4 3;" />`;
+    }
+  });
+  for(let i=0; i<centers.length-1; i++){
+    const cur = centers[i], next = centers[i+1];
+    lines += `<line x1="${cur.x}" y1="${cur.bottom}" x2="${next.x}" y2="${next.top-6}" style="stroke:var(--violet); stroke-width:2px;" marker-end="url(#tf-arrow)" />`;
+  }
+  svg.innerHTML = lines;
+}
+window.addEventListener('resize', ()=>{ if(document.getElementById('tf-diagram')) updateTargetFlowLines(); });
 function renderCompare(){
   const session = state.compareSession;
   if(!session) return `${renderHeader()}<div class="wrap"><div class="empty-note">No comparison session selected. <button class="link-btn" onclick="openComparePicker()">Start one</button></div></div>`;
@@ -2247,6 +2330,7 @@ function renderCompare(){
         <div class="compare-col"><div class="compare-col-title">${escapeHtml(nameB)}</div>${renderCompareSourceColumn('b', editable)}</div>
         <div class="compare-col compare-col-target"><div class="compare-col-title">Target</div>${renderCompareTargetColumn(editable)}</div>
       </div>
+      ${renderTargetFlowSection()}
     </div>
   </div>`;
 }
@@ -2280,6 +2364,7 @@ function render(){
   else if(state.screen==='editor') renderEditor();
   else if(state.screen==='compare-picker') app.innerHTML = renderComparePicker();
   else if(state.screen==='compare') app.innerHTML = renderCompare();
+  if(document.getElementById('tf-diagram')) requestAnimationFrame(updateTargetFlowLines);
 }
 
 function currentAppTool(){
