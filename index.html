@@ -2262,7 +2262,9 @@ function updateTargetFlowLines(){
   });
   for(let i=0; i<centers.length-1; i++){
     const cur = centers[i], next = centers[i+1];
-    lines += `<line x1="${cur.x}" y1="${cur.bottom}" x2="${next.x}" y2="${next.top-8}" style="stroke:var(--violet); stroke-width:2px; stroke-linecap:round;" marker-end="url(#tf-arrow)" />`;
+    // Equal padding on both ends centers the arrow in the gap between the
+    // two boxes, instead of starting flush against the top box.
+    lines += `<line x1="${cur.x}" y1="${cur.bottom+8}" x2="${next.x}" y2="${next.top-8}" style="stroke:var(--violet); stroke-width:2px; stroke-linecap:round;" marker-end="url(#tf-arrow)" />`;
   }
   svg.innerHTML = lines;
 }
