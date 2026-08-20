@@ -108,21 +108,30 @@
     color:var(--gray-400); font-size:9.5px; font-weight:700; line-height:1; cursor:help;
     margin-left:6px; flex-shrink:0; vertical-align:middle; outline:none; }
   .help-icon:hover, .help-icon:focus-visible{ border-color:var(--violet); color:var(--violet); }
-  .help-icon::after{ content:attr(data-tip); position:absolute; bottom:calc(100% + 9px); left:50%;
+  /* Shared custom tooltip bubble — .help-icon (the "?" affordance) and
+     .btn-tip (any other element, e.g. a disabled button, that needs the
+     same professional tooltip instead of the plain native title box) both
+     carry it, driven by the same data-tip attribute and positionHelpTooltip
+     edge-detection. */
+  .help-icon::after, .btn-tip::after{ content:attr(data-tip); position:absolute; bottom:calc(100% + 9px); left:50%;
     transform:translate(-50%, 4px); width:max-content; max-width:220px; background:#fff; color:var(--gray-900);
     padding:8px 11px; border-radius:8px; box-shadow:0 6px 20px rgba(20,15,50,.16), 0 1px 2px rgba(20,15,50,.08);
     font-size:12px; font-weight:500; line-height:1.45; text-align:left; white-space:normal;
     opacity:0; visibility:hidden; pointer-events:none; transition:opacity .15s ease, transform .15s ease; z-index:200; }
-  .help-icon::before{ content:''; position:absolute; bottom:calc(100% + 3px); left:50%;
+  .help-icon::before, .btn-tip::before{ content:''; position:absolute; bottom:calc(100% + 3px); left:50%;
     transform:translate(-50%, 4px); width:0; height:0; border:6px solid transparent; border-top-color:#fff;
     filter:drop-shadow(0 2px 1px rgba(20,15,50,.08));
     opacity:0; visibility:hidden; pointer-events:none; transition:opacity .15s ease, transform .15s ease; z-index:200; }
-  .help-icon:hover::after, .help-icon:focus-visible::after,
-  .help-icon:hover::before, .help-icon:focus-visible::before{ opacity:1; visibility:visible; transform:translate(-50%, 0); }
-  .help-icon.edge-left::after{ left:0; transform:translate(0, 4px); }
-  .help-icon.edge-left:hover::after, .help-icon.edge-left:focus-visible::after{ transform:translate(0, 0); }
-  .help-icon.edge-right::after{ left:auto; right:0; transform:translate(0, 4px); }
-  .help-icon.edge-right:hover::after, .help-icon.edge-right:focus-visible::after{ transform:translate(0, 0); }
+  .help-icon:hover::after, .help-icon:focus-visible::after, .btn-tip:hover::after, .btn-tip:focus-visible::after,
+  .help-icon:hover::before, .help-icon:focus-visible::before, .btn-tip:hover::before, .btn-tip:focus-visible::before{
+    opacity:1; visibility:visible; transform:translate(-50%, 0); }
+  .help-icon.edge-left::after, .btn-tip.edge-left::after{ left:0; transform:translate(0, 4px); }
+  .help-icon.edge-left:hover::after, .help-icon.edge-left:focus-visible::after,
+  .btn-tip.edge-left:hover::after, .btn-tip.edge-left:focus-visible::after{ transform:translate(0, 0); }
+  .help-icon.edge-right::after, .btn-tip.edge-right::after{ left:auto; right:0; transform:translate(0, 4px); }
+  .help-icon.edge-right:hover::after, .help-icon.edge-right:focus-visible::after,
+  .btn-tip.edge-right:hover::after, .btn-tip.edge-right:focus-visible::after{ transform:translate(0, 0); }
+  .btn-tip{ position:relative; }
   .empty-note{ color:var(--gray-400); font-size:13px; font-style:italic; padding:6px 0; }
   .sp-row{ padding:9px 10px; margin:0 -10px; border-bottom:1px solid var(--gray-100); border-radius:8px;
     cursor:pointer; font-size:14.5px; font-weight:600; color:var(--gray-800); transition:all .12s ease;
@@ -2548,7 +2557,7 @@ function renderCompare(){
           ${isAdmin ? (finished
             ? `<button class="btn btn-ghost" onclick="reopenLevel()">Reopen this layer</button>`
             : finishBlocker
-              ? `<button class="btn btn-primary" disabled title="Finish ${nextLevelForFinish.toUpperCase()} for &quot;${escapeHtml(finishBlocker.name || '(untitled)')}&quot; first">Finish this layer</button>`
+              ? `<button class="btn btn-primary btn-tip" disabled data-tip="Finish ${nextLevelForFinish.toUpperCase()} for &quot;${escapeHtml(finishBlocker.name || '(untitled)')}&quot; first" onmouseenter="positionHelpTooltip(this)">Finish this layer</button>`
               : `<button class="btn btn-primary" onclick="finishLevel()">Finish this layer</button>`) : ''}
         </div>
       </div>
