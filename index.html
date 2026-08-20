@@ -1634,6 +1634,14 @@ function openComparePicker(){
   state.comparePickerCompanyA = '';
   state.comparePickerCompanyB = '';
   state.showCompareCreateModal = false;
+  // Without this, a row left expanded from a previous visit (or from
+  // whatever session/level the admin was last drilled into) would render
+  // its L1 inline preview off of state.compareItemsA/B — which, if the
+  // admin came Home from an L2+ build screen, still hold THAT level's
+  // items (e.g. sub-processes), not the mega-cycle list, producing bogus
+  // "matched pairs". Home should always land on a clean, fully-collapsed
+  // list.
+  state.expandedCompareSessionId = null;
   state.screen = 'compare-picker';
   render();
   loadCompareSessions().then(render);
